@@ -1,0 +1,7 @@
+*.o
+*.nro
+*.nro.so
+*~
+*.d
+*.pcapng
+build/

@@ -1,0 +1,16 @@
+interface ilia::IProxyService is ilia {
+	[0] CreatePipe(buffer<uint8_t, 0x5, 0>) -> u32 pipe_id;
+	[1] OpenPipeMessageWriter(u32 pipe_id, pid) -> (object<ilia::IMessageWriter>, u64 s_table_ptr, u64 dispatch);
+	[2] DebugPoint(u64 id, buffer<uint8_t, 0x5, 0> ignored);   
+	[999] DestroyServer();
+}
+
+interface ilia::IMessageWriter {
+	[0] OpenRequest(u64 destination, buffer<uint8_t, 0x5, 0> raw_message);
+	[1] AppendXDescriptor(u64 index, buffer<uint8_t, 0x5, 0> buffer);
+	[2] AppendADescriptor(u64 index, buffer<uint8_t, 0x5, 0> buffer);
+	[3] OpenResponse(u64 ignored, buffer<uint8_t, 0x5, 0> raw_message);
+	[4] AppendBDescriptor(u64 index, buffer<uint8_t, 0x5, 0> buffer);
+	[5] AppendCDescriptor(u64 index, buffer<uint8_t, 0x5, 0> buffer);
+	[6] CloseMessage(u64 ignored, buffer<uint8_t, 0x5, 0> ignored);
+}
