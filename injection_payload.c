@@ -1,14 +1,27 @@
+#include<alloca.h>
 #include<stdint.h>
 #include<string.h>
 #include<libtransistor/types.h>
 #include<libtransistor/svc.h>
 #include<libtransistor/util.h>
 
+#define LOG_RESPONSES 1
+#define PARSE_X_DESCRIPTORS 1
+#define PARSE_A_DESCRIPTORS 1
+#define PARSE_B_DESCRIPTORS 1
+#define PARSE_C_DESCRIPTORS 1
+#define COPY_BUFFERS 0
+
 void memcpy64(void *dest, const void *src, size_t size) {
 	uint64_t *dest64 = (uint64_t*) dest;
 	uint64_t *src64 = (uint64_t*) src;
 	for(size_t i = 0; i < size/sizeof(uint64_t); i++) {
 		dest64[i] = src64[i];
+	}
+	uint8_t *dest8 = (uint8_t*) dest;
+	uint8_t *src8 = (uint8_t*) src;
+	for(size_t i = size & ~7; i < size; i++) {
+		dest8[i] = src8[i];
 	}
 }
 
@@ -55,54 +68,66 @@ typedef struct {
 	dispatch_fptr dispatch;
 } logger_t;
 
-typedef struct heap_info_t {
+typedef struct state_t {
 	bool has_initialized;
-	void *heap;
+	void *tls;
 	session_h proxy_service; // ilia::IProxyService
 	logger_t loggers[ARRAY_LENGTH(mitm_funcs)];
-} heap_info_t;
-
-#define LOG_RESPONSES 1
-#define PARSE_X_DESCRIPTORS 1
-#define PARSE_A_DESCRIPTORS 1
-#define PARSE_B_DESCRIPTORS 1
-#define PARSE_C_DESCRIPTORS 1
+	uint64_t rq_buffer[0x100/sizeof(uint64_t)];
+#ifdef LOG_RESPONSES
+	uint64_t rs_buffer[0x100/sizeof(uint64_t)];
+#endif
+	uint8_t buffer_copy_area[0x5000];
+} state_t;
 
 typedef struct {
 	dispatch_fptr *funcptr;
 	dispatch_fptr dispatch;
 } log_def_t;
 
-void send_message(void *ipc_buffer, session_h s, uint32_t cmd, uint64_t arg, void *buffer_data, size_t buffer_size);
-session_h get_proxy_service(heap_info_t *hi);
-bool initialize_pipe(heap_info_t *hi, uint32_t pipe_index);
+void send_message(session_h s, uint32_t cmd, uint64_t arg, void *buffer_data, size_t buffer_size);
+session_h get_proxy_service(state_t *state);
+bool initialize_pipe(state_t *state, uint32_t pipe_index);
+
+state_t *const state = (void*) 0xab000000;
+const size_t state_size = (sizeof(state_t) + 0xfff) & ~0xfff;
 
 uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pipe_index) {
-	void *heap;
-	svcSetHeapSize(&heap, 0x200000);
-	heap_info_t *hi = heap + 0x1000;
-	hi->heap = heap;
+	memory_info_t mi;
+	uint32_t pi;
+	if(svcQueryMemory(&mi, &pi, state) != RESULT_OK) {
+		svcBreak(0, 0, 0);
+	}
+	if(mi.memory_type == 0) {
+		shared_memory_h shmem;
+		if(svcCreateSharedMemory(&shmem, state_size, 3, 3) != RESULT_OK) {
+			svcBreak(0, 0, 0);
+		}
+		if(svcMapSharedMemory(shmem, state, state_size, 3) != RESULT_OK) {
+			svcBreak(0, 0, 0);
+		}
+	} else if(mi.memory_type != 6) {
+		svcBreak(0, 0, 0);
+	}
 
-	if(!hi->loggers[pipe_index].has_initialized) {
-		if(initialize_pipe(hi, pipe_index)) {
+	// back up request
+	void *tls;
+	asm("mrs %0, tpidrro_el0"
+	    : "=r"(tls) ::);
+	state->tls = tls;
+	memcpy64(state->rq_buffer, tls, 0x100);
+	
+	if(!state->loggers[pipe_index].has_initialized) {
+		if(initialize_pipe(state, pipe_index)) {
 			return 0xEAEAB;
 		}
 	}
 	
-	void *tls;
-	asm("mrs %0, tpidrro_el0"
-	    : "=r"(tls) ::);
-	
-	memcpy64(heap, tls, 0x100);
-
-	void *ipc_buffer = heap + 0x2000;
-	void *buffer_copy_area = heap + 0x3000;
-
-	logger_t *logger = &hi->loggers[pipe_index];
+	logger_t *logger = &state->loggers[pipe_index];
 	session_h writer = logger->writer;
-	send_message(ipc_buffer, writer, 0, (uint64_t) this, heap, 0x100); // OpenRequest
+	send_message(writer, 0, (uint64_t) this, state->rq_buffer, 0x100); // OpenRequest
 
-	uint32_t *mu32 = heap;
+	uint32_t *mu32 = (uint32_t*) state->rq_buffer;
 	int h = 0;
 
 	uint32_t header0 = mu32[h++];
@@ -140,8 +165,10 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 			size = *field >> 16;
 
 			if(addr != 0 && size != 0) {
-				memcpy64(buffer_copy_area, (void*) addr, size);
-				send_message(ipc_buffer, writer, 1, i, buffer_copy_area, size); // AppendXDescriptor
+				if(COPY_BUFFERS) {
+					memcpy64(state->buffer_copy_area, (void*) addr, size);
+				}
+				send_message(writer, 1, i, COPY_BUFFERS ? state->buffer_copy_area : addr, size); // AppendXDescriptor
 			}
 		}
 	}
@@ -156,18 +183,21 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 			size|= (uint64_t) ((field >> 24) & 0b1111) << 32;
 
 			if(addr != 0 && size != 0) {
-				memcpy64(buffer_copy_area, (void*) addr, size);
-				send_message(ipc_buffer, writer, 2, i, buffer_copy_area, size); /// AppendADescriptor
+				if(COPY_BUFFERS) {
+					memcpy64(state->buffer_copy_area, (void*) addr, size);
+				}
+				send_message(writer, 2, i, COPY_BUFFERS ? state->buffer_copy_area : addr, size); /// AppendADescriptor
 			}
 		}
 		h+= 3;
 	}
-	
+
+	memcpy64(tls, state->rq_buffer, 0x100); // restore incoming message
 	uint64_t ret = logger->dispatch(this, message, pas);
 
 	if(LOG_RESPONSES) {
-		memcpy64(heap + 0x100, tls, 0x100);
-		send_message(ipc_buffer, writer, 3, (uint64_t) this, heap + 0x100, 0x100); // OpenResponse
+		memcpy64(state->rs_buffer, tls, 0x100); // save outgoing response
+		send_message(writer, 3, (uint64_t) this, state->rs_buffer, 0x100); // OpenResponse
 
 		for(int i = 0; i < num_b_descriptors; i++) {
 			if(PARSE_B_DESCRIPTORS) {
@@ -179,8 +209,10 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 				size|= (uint64_t) ((field >> 24) & 0b1111) << 32;
 
 				if(addr != 0 && size != 0) {
-					memcpy64(buffer_copy_area, (void*) addr, size);
-					send_message(ipc_buffer, writer, 4, i, buffer_copy_area, size); /// AppendBDescriptor
+					if(COPY_BUFFERS) {
+						memcpy64(state->buffer_copy_area, (void*) addr, size);
+					}
+					send_message(writer, 4, i, COPY_BUFFERS ? state->buffer_copy_area : addr, size); /// AppendBDescriptor
 				}
 			}
 			h+= 3;
@@ -196,8 +228,10 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 				size = field >> 16;
 
 				if(addr != 0 && size != 0) {
-					memcpy64(buffer_copy_area, (void*) addr, size);
-					send_message(ipc_buffer, writer, 5, i, buffer_copy_area, size);
+					if(COPY_BUFFERS) {
+						memcpy64(state->buffer_copy_area, (void*) addr, size);
+					}
+					send_message(writer, 5, i, COPY_BUFFERS ? state->buffer_copy_area : addr, size);
 				}
 				
 				h+= 2;
@@ -205,12 +239,16 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 		}
 	}
 
-	send_message(ipc_buffer, writer, 6, 0, NULL, 0); // CloseMessage
+	send_message(writer, 6, 0, NULL, 0); // CloseMessage
+
+	if(LOG_RESPONSES) {
+		memcpy64(tls, state->rs_buffer, 0x100); // restore outgoing response (not sure if we need to?)
+	}
 	
 	return ret;
 }
 
-void send_message(void *ipc_buffer, session_h s, uint32_t cmd, uint64_t arg, void *buffer_data, size_t buffer_size) {
+void send_message(session_h s, uint32_t cmd, uint64_t arg, void *buffer_data, size_t buffer_size) {
 	/*
 	  ipcm+0x0  | 04 00 10 00 09 00 00 00  bc 01 00 00 bc 01 00 00 | ................ |
 	  ipcm+0x10 | 00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00 | ................ |
@@ -223,10 +261,16 @@ void send_message(void *ipc_buffer, session_h s, uint32_t cmd, uint64_t arg, voi
 		0x53, 0x46, 0x43, 0x49, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x9e, 0x09, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
 	};
-	memcpy64(ipc_buffer, messageu8, sizeof(messageu8));
-	uint32_t *messageu32 = ipc_buffer;
+	memcpy64(state->tls, messageu8, sizeof(messageu8));
+	uint32_t *messageu32 = state->tls;
+
+	void *buffer_copy = buffer_data;
+	if(buffer_data >= state && buffer_data < state + sizeof(*state)) {
+		buffer_copy = alloca((buffer_size + 7) & ~7);
+		memcpy64(buffer_copy, buffer_data, buffer_size);
+	}
 	
-	uint64_t buffer_addr = (uint64_t) buffer_data;
+	uint64_t buffer_addr = (uint64_t) buffer_copy;
 	messageu32[2] = buffer_size & 0xFFFFFFFF;
 	messageu32[3] = buffer_addr & 0xFFFFFFFF;
 	messageu32[4] =
@@ -236,17 +280,15 @@ void send_message(void *ipc_buffer, session_h s, uint32_t cmd, uint64_t arg, voi
 	messageu32[10] = cmd;
 	*((uint64_t*) &messageu32[12]) = arg;
 
-	svcSendSyncRequestWithUserBuffer(ipc_buffer, 0x1000, s);
+	if(svcSendSyncRequest(s) != RESULT_OK) { svcBreak(0, 0, 0); }
 }
 
-session_h get_proxy_service(heap_info_t *hi) {
-	void *heap = hi->heap;
-	
-	if(hi->has_initialized) {
-		return hi->proxy_service;
+session_h get_proxy_service(state_t *state) {
+	if(state->has_initialized) {
+		return state->proxy_service;
 	} else {
 		session_h sm;
-		svcConnectToNamedPort(&sm, "sm:");
+		if(svcConnectToNamedPort(&sm, "sm:") != RESULT_OK) { svcBreak(0, 0, 0); }
 		
 		/*
 		  ipcm+0x0  | 04 00 00 00 0a 00 00 00  00 00 00 00 00 00 00 00 | ................ |
@@ -259,24 +301,22 @@ session_h get_proxy_service(heap_info_t *hi) {
 			0x53, 0x46, 0x43, 0x49, 0x00, 0x00, 0x00, 0x00,  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 			0x69, 0x6c, 0x69, 0x61, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00, 0x20, 0x00, 0x00, 0x00,
 		};
-		memcpy64(heap, ipct_get_service, sizeof(ipct_get_service));
-		svcSendSyncRequestWithUserBuffer(heap, 0x1000, sm);
+		memcpy64(state->tls, ipct_get_service, sizeof(ipct_get_service));
+		if(svcSendSyncRequest(sm) != RESULT_OK) { svcBreak(0, 0, 0); }
 		svcCloseHandle(sm);
 		
-		session_h proxy_service = *((uint32_t*) (heap + 0xc));
+		session_h proxy_service = *((uint32_t*) (state->tls + 0xc));
 		
-		send_message(heap + 0x3000, proxy_service, 2, 99, NULL, 0);
+		send_message(proxy_service, 2, 99, NULL, 0);
 
-		hi->proxy_service = proxy_service;
-		hi->has_initialized = true;
+		state->proxy_service = proxy_service;
+		state->has_initialized = true;
 		return proxy_service;
 	}
 }
 
-bool initialize_pipe(heap_info_t *hi, uint32_t i) {
-	void *heap = hi->heap;
-	
-	session_h proxy_service = get_proxy_service(hi);
+bool initialize_pipe(state_t *state, uint32_t i) {
+	session_h proxy_service = get_proxy_service(state);
 	
 	uint8_t ipct_open_message_writer[] = {
 		0x04, 0x00, 0x00, 0x00, 0x09, 0x00, 0x00, 0x80,  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
@@ -284,27 +324,23 @@ bool initialize_pipe(heap_info_t *hi, uint32_t i) {
 		0x53, 0x46, 0x43, 0x49, 0x00, 0x00, 0x00, 0x00,  0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 		0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,  0x00, 0x00, 0x00, 0x00,
 	};
-	memcpy64(heap, ipct_open_message_writer, sizeof(ipct_open_message_writer));
-	*((uint32_t*) (heap + 0x30)) = i;
-	svcSendSyncRequestWithUserBuffer(heap, 0x1000, proxy_service);
+	memcpy64(state->tls, ipct_open_message_writer, sizeof(ipct_open_message_writer));
+	*((uint32_t*) (state->tls + 0x30)) = i;
+	if(svcSendSyncRequest(proxy_service) != RESULT_OK) { svcBreak(0, 0, 0); }
 	
-	send_message(heap + 0x3000, proxy_service, 2, 2, NULL, 0);
-	
-	if(*((uint32_t*) (heap + 0x18)) != 0) {
+	if(*((uint32_t*) (state->tls + 0x18)) != 0) {
 		return true;
 	}
 	
-	send_message(heap + 0x3000, proxy_service, 2, 2, NULL, 0);
+	session_h writer = *((uint32_t*) (state->tls + 0xc));
+	log_def_t *def = state->tls + 0x20;
 	
-	session_h writer = *((uint32_t*) (heap + 0xc));
-	log_def_t *def = heap + 0x20;
+	state->loggers[i].writer = writer;
+	state->loggers[i].dispatch = def->dispatch;
 	
-	hi->loggers[i].writer = writer;
-	hi->loggers[i].dispatch = def->dispatch;
-	
-	send_message(heap + 0x3000, proxy_service, 2, 3, NULL, 0);
+	send_message(proxy_service, 2, 3, NULL, 0);
 
-	hi->loggers[i].has_initialized = true;
+	state->loggers[i].has_initialized = true;
 	
 	return false;
 }
