@@ -27,6 +27,7 @@ local pf_rs_num_wd = ProtoField.uint32("ilia.rs.num_wd", "Number of W Descriptor
 local pf_rs_rd_words = ProtoField.uint32("ilia.rs.rd_words", "Raw Data Size (in words)", base.HEX, nil, 0x0000003f)
 local pf_rs_cd_flags = ProtoField.uint32("ilia.rs.cd_flags", "C Descriptor Flags", base.DEC, nil, 0x00003c00)
 local pf_rs_has_hd = ProtoField.bool("ilia.rs.has_hd", "Has Handle Descriptor", 32, {"yes", "no"}, 0x80000000)
+local pf_rs_dom_out_obj_count = ProtoField.uint8("ilia.rs.domain.out_obj_count", "Domain Output Object Count")
 local pf_rs_magic = ProtoField.string("ilia.rs.magic", "Response Magic")
 local pf_rs_code = ProtoField.uint32("ilia.rs.id", "Response Code", base.DEC)
 local pf_rs_raw_params = ProtoField.bytes("ilia.rs.raw_params", "Raw Data")
@@ -68,6 +69,7 @@ hipc.fields = {
    pf_rs_rd_words,
    pf_rs_cd_flags,
    pf_rs_has_hd,
+   pf_rs_dom_out_obj_count,
    pf_rs_magic,
    pf_rs_code,
    pf_rs_raw_params,
@@ -124,30 +126,29 @@ function hipc.dissector(buffer, pinfo, tree)
    
    local head = 8
 
-   --[[
-   if f_has_hd()() then
+   if f_rq_has_hd()() then
       local hdbegin = head
       local hd = buffer(head, 4):le_uint()
       head = head + 4
       local sendPid = bit32.band(hd, 1) == 1
       local pid = 0
       if sendPid then
-	 pid = buffer(head, 8):le_uint64()
-	 head = head + 8
+         pid = buffer(head, 8):le_uint64()
+         head = head + 8
       end
       local numCopyHandles = bit32.band(bit32.rshift(hd, 1), 15)
       local numMoveHandles = bit32.band(bit32.rshift(hd, 5), 15)
       local copyHandles = {}
       local moveHandles = {}
       for i=1,numCopyHandles do
-	 copyHandles[i] = buffer(head, 4)
-	 head = head + 4
+         copyHandles[i] = buffer(head, 4)
+         head = head + 4
       end
       for i=1,numMoveHandles do
-	 moveHandles[i] = buffer(head, 4)
-	 head = head + 4
+         moveHandles[i] = buffer(head, 4)
+         head = head + 4
       end
-      end]]--
+   end
 
    local data_head = 0x100
 
@@ -260,7 +261,15 @@ function hipc.dissector(buffer, pinfo, tree)
    head = head + (f_rs_wds()() * 12)
    
    head = data_head + bit32.band(head - data_head + 15, 0xFFFFFFF0) -- align head for aligned data section
-   response_tree:add_le(pf_rs_magic, buffer(head, 4))
-   response_tree:add_le(pf_rs_code, buffer(head + 8, 4))
-   response_tree:add_le(pf_rs_raw_params, buffer(head + 16, (f_rs_rd_words()() * 4) - 16))
+   magic = buffer(head, 4):le_uint()
+   if magic == 0x4f434653 then
+      response_tree:add_le(pf_rs_magic, buffer(head, 4))
+      response_tree:add_le(pf_rs_code, buffer(head + 8, 4))
+      response_tree:add_le(pf_rs_raw_params, buffer(head + 16, (f_rs_rd_words()() * 4) - 16))
+   else
+      response_tree:add_le(pf_rs_dom_out_obj_count, buffer(head, 4))
+      response_tree:add_le(pf_rs_magic, buffer(head + 16, 4))
+      response_tree:add_le(pf_rs_code, buffer(head + 24, 4))
+      response_tree:add_le(pf_rs_raw_params, buffer(head + 32, (f_rs_rd_words()() * 4) - 16))
+   end
 end
