@@ -20,54 +20,43 @@
 #include "IProxyService.hpp"
 
 int main(int argc, char *argv[]) {
-   trn::ResultCode::AssertOk(bsd_init());
-
-	struct addrinfo hints;
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_INET;
-	hints.ai_socktype = SOCK_STREAM;
-
-	struct addrinfo *workstation;
-	if(bsd_getaddrinfo("Squash", "5566", &hints, &workstation) != 0) {
-		printf("failed gai\n");
-      return bsd_result;
-	}
-
-	struct sockaddr_in *wk_addr = (struct sockaddr_in*) workstation->ai_addr;
-	uint32_t wk_ip = wk_addr->sin_addr.s_addr;
-	char *wk_ip_bytes = (char*) &wk_ip;
-	printf("connecting to %d.%d.%d.%d:%d\n", wk_ip_bytes[0], wk_ip_bytes[1], wk_ip_bytes[2], wk_ip_bytes[3], ntohs(wk_addr->sin_port));
-	
-	int socketfd = bsd_socket(workstation->ai_family, workstation->ai_socktype, workstation->ai_protocol);
-	printf("opened socket %d\n", socketfd);
-	if(socketfd < 0) {
-      return bsd_result;
-	}
-	if(bsd_connect(socketfd, workstation->ai_addr, workstation->ai_addrlen) != 0) {
-		printf("failed to connect\n");
-      return bsd_result;
-	}
-	bsd_freeaddrinfo(workstation);
-
-   ilia::Ilia ilia(socketfd);
-   trn::ResultCode::AssertOk(ilia.InterceptAll("nns::hosbinder::IHOSBinderDriver").code);
-   while(!ilia.destroy_flag) {
-      trn::ResultCode::AssertOk(ilia.event_waiter.Wait(3000000000));
-   }
-   printf("ilia terminating\n");
+   try {
+      ilia::Ilia ilia;
+      const char *ifaces[] = {
+         "nn::am::service::IAllSystemAppletProxiesService",
+         "nn::am::service::ILibraryAppletProxy",
+         "nn::am::service::ILibraryAppletSelfAccessor",
+         "nn::am::service::ILibraryAppletCreator",
+         "nn::am::service::ILibraryAppletAccessor",
+         "nn::am::service::IStorage",
+         "nn::am::service::IStorageAccessor",
+      };
+      for(uint32_t i = 0; i < ARRAY_LENGTH(ifaces); i++) {
+         fprintf(stderr, "intercepting %s...\n", ifaces[i]);
+         trn::ResultCode::AssertOk(ilia.InterceptAll(ifaces[i]).code);
+      }
+      fprintf(stderr, "done intercepting\n");
+      while(!ilia.destroy_flag) {
+         trn::ResultCode::AssertOk(ilia.event_waiter.Wait(3000000000));
+      }
+      fprintf(stderr, "ilia terminating\n");
    
-	return 0;
+      return 0;
+   } catch(trn::ResultError &e) {
+      fprintf(stderr, "caught ResultError: 0x%x\n", e.code.code);
+      return e.code.code;
+   }
 }
 
 namespace ilia {
 
-Ilia::Ilia(int socketfd) :
-   pcap_writer(socketfd),
+Ilia::Ilia() :
+   pcap_writer(),
    event_waiter(),
    server(trn::ResultCode::AssertOk(trn::ipc::server::IPCServer::Create(&event_waiter))) {
 
    server.CreateService("ilia", [this](auto s) {
-         printf("something is connecting to ilia\n");
+         fprintf(stderr, "something is connecting to ilia\n");
          return new ilia::IProxyService(s, this);
       });
 
@@ -109,7 +98,7 @@ void Ilia::ProbeProcesses() {
          trn::ipc::InRaw<uint64_t>(pids[i]),
          trn::ipc::OutHandle<handle_t, trn::ipc::copy>(proc_handle));
       if(!r) {
-         printf("failed to get process handle for %ld: 0x%x\n", pids[i], r.error().code);
+         fprintf(stderr, "failed to get process handle for %ld: 0x%x\n", pids[i], r.error().code);
          continue;
       }
    
@@ -122,7 +111,7 @@ trn::ResultCode Ilia::InterceptAll(std::string interface_name) {
       auto &proc = kv.second;
       for(auto &st : proc.s_tables) {
          if(st.interface_name == interface_name) {
-            printf("patching s_Table(%s) in %ld\n", st.interface_name.c_str(), proc.pid);
+            fprintf(stderr, "patching s_Table(%s) in %ld\n", st.interface_name.c_str(), proc.pid);
             if(proc.pipes.size() >= 16) {
                return trn::ResultCode(ILIA_ERR_TOO_MANY_PIPES);
             }

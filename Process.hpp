@@ -72,7 +72,7 @@ class Process {
       uint64_t aligned_size = (size + 0xfff) & ~0xfff;
       auto r = trn::svc::MapProcessMemory(this->proc, aligned_addr, aligned_size);
       while(!r && r.error().code == 0xdc01) {
-         printf("looping on 0xdc01\n");
+         fprintf(stderr, "looping on 0xdc01\n");
          svcSleepThread(100000);
          r = trn::svc::MapProcessMemory(this->proc, aligned_addr, aligned_size);
       }

@@ -23,9 +23,9 @@ void Pipe::Patch() {
    }
 
    Process::RemoteValue<uint64_t> remote = process->Access<uint64_t>(s_table->addr);
-   printf("patching function pointer...\n");
+   fprintf(stderr, "patching function pointer...\n");
    remote = s_table->nso->base + ilia->mitm_func_offsets[id];
-   printf("patched function pointer\n");
+   fprintf(stderr, "patched function pointer\n");
 }
 
 } // namespace ilia

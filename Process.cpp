@@ -60,22 +60,22 @@ Process::Process(Ilia *ilia,
       }
 
       if(dyn_map.find(DT_STRTAB) == dyn_map.end()) {
-         printf("  couldn't find string table\n");
+         fprintf(stderr, "  couldn't find string table\n");
          continue;
       }
       if(dyn_map.find(DT_STRSZ) == dyn_map.end()) {
-         printf("  couldn't find string table size\n");
+         fprintf(stderr, "  couldn't find string table size\n");
          continue;
       }
 
       RemoteValue<char> string_table = Access<char>(info.addr + dyn_map[DT_STRTAB].d_val, dyn_map[DT_STRSZ].d_val);
       if(dyn_map.find(DT_SYMTAB) == dyn_map.end()) {
-         printf("  couldn't find symbol table\n");
+         fprintf(stderr, "  couldn't find symbol table\n");
          continue;
       }
 
       if(dyn_map.find(DT_HASH) == dyn_map.end()) {
-         printf("  couldn't find hash table\n");
+         fprintf(stderr, "  couldn't find hash table\n");
          continue;
       }
 
@@ -99,13 +99,13 @@ Process::Process(Ilia *ilia,
                name.compare(name.length() - (sizeof(postfix) - 1),
                             sizeof(postfix) - 1, postfix) == 0) {
                name = name.substr(sizeof(prefix) - 1, name.length() - sizeof(prefix) + 1 - sizeof(postfix) + 1);
-               printf("  found s_Table: %s\n", name.c_str());
+               fprintf(stderr, "  found s_Table: %s\n", name.c_str());
                STable s_table = {this, nso, name, info.addr + sym.st_value, *Access<uint64_t>(info.addr + sym.st_value)};
-               printf("    addr: 0x%lx\n", s_table.addr);
-               printf("    value: 0x%lx\n", s_table.original_value);
+               fprintf(stderr, "    addr: 0x%lx\n", s_table.addr);
+               fprintf(stderr, "    value: 0x%lx\n", s_table.original_value);
                s_tables.push_back(s_table);
             } else {
-               printf("  found non-matching s_Table: %s\n", name.c_str());
+               fprintf(stderr, "  found non-matching s_Table: %s\n", name.c_str());
             }
          }
       }
@@ -119,9 +119,9 @@ void Process::NSO::InjectPayload() {
 
    std::vector<uint8_t> &payload = process->ilia->injection_payload;
    RemoteValue<uint8_t> remote = process->Access<uint8_t>(base, payload.size());
-   printf("injecting payload...\n");
+   fprintf(stderr, "injecting payload...\n");
    memcpy(&remote[0], payload.data(), payload.size());
-   printf("injected payload\n");
+   fprintf(stderr, "injected payload\n");
    
    has_injected_payload = true;
 }

@@ -18,7 +18,7 @@ IProxyService::IProxyService(trn::ipc::server::IPCServer *server, Ilia *ilia) : 
 }
 
 trn::ResultCode IProxyService::Dispatch(trn::ipc::Message msg, uint32_t request_id) {
-   printf("dispatching %d\n", request_id);
+   fprintf(stderr, "dispatching %d\n", request_id);
    switch(request_id) {
    case 0:
       return trn::ipc::server::RequestHandler<&IProxyService::CreatePipe>::Handle(this, msg);
@@ -38,7 +38,7 @@ trn::ResultCode IProxyService::CreatePipe(trn::ipc::Buffer<uint8_t, 0x5> name, t
 }
 
 trn::ResultCode IProxyService::OpenPipeMessageWriter(trn::ipc::InRaw<uint32_t> pipe_id, trn::ipc::InPid pid, trn::ipc::OutObject<ilia::IMessageWriter> &writer, trn::ipc::OutRaw<uint64_t[2]> offsets) {
-   printf("IPS: Opening IMessageWriter for pipe %d on process 0x%lx\n", *pipe_id, pid.value);
+   fprintf(stderr, "IPS: Opening IMessageWriter for pipe %d on process 0x%lx\n", *pipe_id, pid.value);
    auto pi = ilia->processes.find(pid.value);
    if(pi == ilia->processes.end()) {
       return trn::ResultCode(ILIA_ERR_UNRECOGNIZED_PID);
@@ -52,7 +52,7 @@ trn::ResultCode IProxyService::OpenPipeMessageWriter(trn::ipc::InRaw<uint32_t> p
       return trn::ResultCode(ILIA_ERR_NO_SUCH_PIPE);
 	}
 
-	printf("opening message writer for '%s'...\n", pipe.s_table->interface_name.c_str());
+	fprintf(stderr, "opening message writer for '%s'...\n", pipe.s_table->interface_name.c_str());
    auto writer_result = server->CreateObject<ilia::IMessageWriter>(this, &pipe, ilia);
    if(writer_result) {
       writer.value = *writer_result;
@@ -63,16 +63,16 @@ trn::ResultCode IProxyService::OpenPipeMessageWriter(trn::ipc::InRaw<uint32_t> p
 	(*offsets)[0] = pipe.s_table->addr;
 	(*offsets)[1] = pipe.s_table->original_value;
 
-	printf("funcptr_offset: 0x%lx\n", pipe.s_table->addr);
-	printf("dispatch_offset: 0x%lx\n", pipe.s_table->original_value);
+	fprintf(stderr, "funcptr_offset: 0x%lx\n", pipe.s_table->addr);
+	fprintf(stderr, "dispatch_offset: 0x%lx\n", pipe.s_table->original_value);
 	
-	printf("opened message writer\n");
+	fprintf(stderr, "opened message writer\n");
 	
 	return trn::ResultCode(RESULT_OK);
 }
 
 trn::ResultCode IProxyService::DebugPoint(trn::ipc::InRaw<uint64_t> id, trn::ipc::Buffer<uint8_t, 0x5> ignored) {
-   printf("hit debug point %ld\n", *id);
+   fprintf(stderr, "hit debug point %ld\n", *id);
    return trn::ResultCode(RESULT_OK);
 }
 

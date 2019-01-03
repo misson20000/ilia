@@ -13,7 +13,7 @@ namespace ilia {
 
 class Ilia {
   public:
-   Ilia(int pcapfd);
+   Ilia();
    
    bool destroy_flag = false;
    pcapng::Writer pcap_writer;
