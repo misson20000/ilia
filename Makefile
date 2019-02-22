@@ -38,10 +38,10 @@ build/ilia.nro.so: $(addprefix build/,$(ILIA_OBJECTS)) build/libiberty/libiberty
 	$(LD) $(LD_FLAGS) -o $@ $(addprefix build/,$(ILIA_OBJECTS)) $(LIBTRANSISTOR_NRO_LDFLAGS) -L build/libiberty/ -liberty
 
 build/injection_payload.bin: build/injection_payload.elf
-	aarch64-none-elf-objcopy -O binary $< $@
+	aarch64-none-elf-objcopy -O binary -j .text $< $@
 
 build/injection_payload.elf: injection_link.T build/injection_payload.o
-	$(LD) $(INJECTION_LD_FLAGS) -o $@ $^ -ltransistor.nro
+	$(LD) $(INJECTION_LD_FLAGS) -o $@ build/injection_payload.o -ltransistor.nro
 
 build/injection_payload.o: injection_payload.c
 	$(CC) $(INJECTION_CC_FLAGS) -c -o $@ $<

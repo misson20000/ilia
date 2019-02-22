@@ -43,6 +43,13 @@ trn::ResultCode IMessageWriter::OpenRequest(trn::ipc::InRaw<uint64_t> destinatio
 	size_t message_size = 0;
 	message_size+= 0x100; // request
 
+   if(pipe->is_in_rq || pipe->is_in_rs) {
+      fprintf(stderr, "invalid pipe state in OpenRequest\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   } else {
+      fprintf(stderr, "valid pipe state in OpenRequest\n");
+   }
+   
 	if(message.data == NULL) {
 		return trn::ResultCode(LIBTRANSISTOR_ERR_UNSPECIFIED);
 	}
@@ -96,7 +103,7 @@ trn::ResultCode IMessageWriter::OpenRequest(trn::ipc::InRaw<uint64_t> destinatio
 		buf->type = typemap[prot] << 6;
 		
 		message_size+= buf->size;
-	}
+   }
 
 	// unpack c descriptors
 	h = 0;
@@ -126,15 +133,13 @@ trn::ResultCode IMessageWriter::OpenRequest(trn::ipc::InRaw<uint64_t> destinatio
 		message_size+= buf->size;
 	}
 
-	message_size+= 0x100; // response
-
    pipe->blob.resize(message_size, 0);
    std::copy_n(message.data, message.size, pipe->blob.begin());
    
    size_t offset = 0x100;
 	for(int i = 0; i < msg.num_x_descriptors; i++) {
-		pipe->x_descriptors[i].data_offset = offset;
-		pipe->x_descriptors[i].size = x_descriptors[i].size;
+		pipe->x_descriptors_rq[i].data_offset = offset;
+		pipe->x_descriptors_rq[i].size = x_descriptors[i].size;
 		offset+= x_descriptors[i].size;
 	}
 	for(int i = 0; i < msg.num_a_descriptors; i++) {
@@ -152,12 +157,14 @@ trn::ResultCode IMessageWriter::OpenRequest(trn::ipc::InRaw<uint64_t> destinatio
 		pipe->c_descriptors[i].size = c_descriptors[i].size;
 		offset+= c_descriptors[i].size;
 	}
-	pipe->response_offset = offset;
-	offset+= 0x100;
+   
 	if(offset > message_size) {
       return trn::ResultCode(0xff);
 	}
 
+   pipe->rs_offset = offset;
+   pipe->is_in_rq = true;
+   
    return trn::ResultCode(RESULT_OK);
 }
 
@@ -177,35 +184,105 @@ trn::ResultCode IMessageWriter::AppendDescriptor(SavedDescriptor *list, uint64_t
 }
 
 trn::ResultCode IMessageWriter::AppendXDescriptor(trn::ipc::InRaw<uint64_t> index, trn::ipc::Buffer<uint8_t, 0x5> data) {
-   return AppendDescriptor(pipe->x_descriptors, *index, data);
+   if(pipe->is_in_rq && !pipe->is_in_rs) {
+      return AppendDescriptor(pipe->x_descriptors_rq, *index, data);
+   } else if(pipe->is_in_rs && !pipe->is_in_rq) {
+      return AppendDescriptor(pipe->x_descriptors_rs, *index, data);
+   } else {
+      fprintf(stderr, "invalid pipe state in AppendXDescriptor\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   }
 }
 
 trn::ResultCode IMessageWriter::AppendADescriptor(trn::ipc::InRaw<uint64_t> index, trn::ipc::Buffer<uint8_t, 0x5> data) {
+   if(!pipe->is_in_rq || pipe->is_in_rs) {
+      fprintf(stderr, "invalid pipe state in AppendADescriptor\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   }
    return AppendDescriptor(pipe->a_descriptors, *index, data);
 }
 
 trn::ResultCode IMessageWriter::OpenResponse(trn::ipc::InRaw<uint64_t> ignored, trn::ipc::Buffer<uint8_t, 0x5> message) {
+   if(!pipe->is_in_rq || pipe->is_in_rs) {
+      fprintf(stderr, "invalid pipe state in OpenResponse\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   }
+
 	if(message.data == NULL) {
 		return trn::ResultCode(LIBTRANSISTOR_ERR_UNSPECIFIED);
 	}
 
-   std::copy_n(message.data, message.size, pipe->blob.begin() + pipe->response_offset);
+   size_t rs_size = 0;
+   rs_size+= 0x100; // raw response
+
+   ipc_message_t msg;
+   {
+      auto r = trn::ResultCode::ExpectOk(ipc_unpack((uint32_t*) message.data, &msg));
+      if(!r) {
+         return r.error();
+      }
+   }
+
+   uint32_t h;
+   ipc_buffer_t x_descriptors[16];
+
+   // unpack x descriptors
+   h = 0;
+   for(uint32_t i = 0; i < msg.num_x_descriptors; i++) {
+		uint32_t field = msg.x_descriptors[h++];
+		uint64_t addr = 0;
+		addr|= (((uint64_t) field >> 6) & 0b111) << 36;
+		addr|= (((uint64_t) field >> 12) & 0b1111) << 32;
+		addr|= msg.x_descriptors[h++]; // lower 32 bits
+		x_descriptors[i].addr = (void*) addr;
+		x_descriptors[i].size = field >> 16;
+		rs_size+= x_descriptors[i].size;
+	}
+
+   pipe->blob.resize(pipe->rs_offset + rs_size);
+   std::copy_n(message.data, message.size, pipe->blob.begin() + pipe->rs_offset);
+   
+   size_t offset = pipe->rs_offset + 0x100;
+	for(int i = 0; i < msg.num_x_descriptors; i++) {
+		pipe->x_descriptors_rs[i].data_offset = offset;
+		pipe->x_descriptors_rs[i].size = x_descriptors[i].size;
+		offset+= x_descriptors[i].size;
+	}
+
+   if(offset > pipe->blob.size()) {
+      return trn::ResultCode(0xff);
+   }
+   
+   pipe->is_in_rq = false;
+   pipe->is_in_rs = true;
+   
 	return RESULT_OK;
 }
 
 trn::ResultCode IMessageWriter::AppendBDescriptor(trn::ipc::InRaw<uint64_t> index, trn::ipc::Buffer<uint8_t, 0x5> data) {
+   if(!pipe->is_in_rq || pipe->is_in_rs) {
+      fprintf(stderr, "invalid pipe state in AppendBDescriptor\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   }
    return AppendDescriptor(pipe->b_descriptors, *index, data);
 }
 
 trn::ResultCode IMessageWriter::AppendCDescriptor(trn::ipc::InRaw<uint64_t> index, trn::ipc::Buffer<uint8_t, 0x5> data) {
+   if(!pipe->is_in_rq || pipe->is_in_rs) {
+      fprintf(stderr, "invalid pipe state in AppendCDescriptor\n");
+      return trn::ResultCode(ILIA_ERR_INVALID_PIPE_STATE);
+   }
    return AppendDescriptor(pipe->c_descriptors, *index, data);
 }
 
 trn::ResultCode IMessageWriter::CloseMessage(trn::ipc::InRaw<uint64_t> ignored, trn::ipc::Buffer<uint8_t, 0x5> also_ignored) {
 	ilia->pcap_writer.WriteEPB(pipe->pcapng_id, svcGetSystemTick(), pipe->blob.size(), pipe->blob.size(), pipe->blob.data(), NULL);
    pipe->blob.clear();
-	pipe->response_offset = 0;
-	memset(pipe->x_descriptors, 0, sizeof(pipe->x_descriptors));
+	pipe->rs_offset = 0;
+   pipe->is_in_rq = false;
+   pipe->is_in_rs = false;
+	memset(pipe->x_descriptors_rq, 0, sizeof(pipe->x_descriptors_rq));
+   memset(pipe->x_descriptors_rs, 0, sizeof(pipe->x_descriptors_rs));
 	memset(pipe->a_descriptors, 0, sizeof(pipe->a_descriptors));
 	memset(pipe->b_descriptors, 0, sizeof(pipe->b_descriptors));
 	memset(pipe->c_descriptors, 0, sizeof(pipe->c_descriptors));

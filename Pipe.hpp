@@ -21,9 +21,12 @@ class Pipe {
    
 	bool exists;
 	uint32_t pcapng_id;
+   bool is_in_rq = false;
+   bool is_in_rs = false;
    std::vector<uint8_t> blob;
-	size_t response_offset;
-	SavedDescriptor x_descriptors[16];
+   size_t rs_offset;
+	SavedDescriptor x_descriptors_rq[16];
+   SavedDescriptor x_descriptors_rs[16];
 	SavedDescriptor a_descriptors[16];
 	SavedDescriptor b_descriptors[16];
 	SavedDescriptor c_descriptors[16];

@@ -156,12 +156,12 @@ function hipc.dissector(buffer, pinfo, tree)
    if inst_f_xds() > 0 then
       local xd_tree = request_tree:add("X Descriptors")
       for i=1, f_rq_xds()() do
-	 local this_xd = xd_tree:add("X Descriptor #" .. i)
-	 this_xd:add_le(pf_xd_size, buffer(head, 4))
-	 sz = f_xd_size()()
-	 this_xd:add(pf_descriptor_data, buffer(data_head, sz))
-	 data_head = data_head + sz
-	 head = head + 8
+         local this_xd = xd_tree:add("X Descriptor #" .. i)
+         this_xd:add_le(pf_xd_size, buffer(head, 4))
+         sz = f_xd_size()()
+         this_xd:add(pf_descriptor_data, buffer(data_head, sz))
+         data_head = data_head + sz
+         head = head + 8
       end
    end
 
@@ -254,8 +254,21 @@ function hipc.dissector(buffer, pinfo, tree)
    response_tree:add_le(pf_rs_cd_flags, rs_buffer(4, 4))
    response_tree:add_le(pf_rs_has_hd, rs_buffer(4, 4))
 
-   local head = head + 8
-   head = head + (f_rs_xds()() * 8)
+   data_head = head + 0x100
+   
+   head = head + 8
+   local inst_f_rs_xds = f_rs_xds()
+   if inst_f_rs_xds() > 0 then
+      local xd_tree = response_tree:add("X Descriptors")
+      for i=1, f_rs_xds()() do
+         local this_xd = xd_tree:add("X Descriptor #" .. i)
+         this_xd:add_le(pf_xd_size, buffer(head, 4))
+         sz = f_xd_size()()
+         this_xd:add(pf_descriptor_data, buffer(data_head, sz))
+         data_head = data_head + sz
+         head = head + 8
+      end
+   end
    head = head + (f_rs_ads()() * 12)
    head = head + (f_rs_bds()() * 12)
    head = head + (f_rs_wds()() * 12)

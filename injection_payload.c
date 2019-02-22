@@ -9,7 +9,7 @@
 #define PARSE_X_DESCRIPTORS 1
 #define PARSE_A_DESCRIPTORS 1
 #define PARSE_B_DESCRIPTORS 1
-#define PARSE_C_DESCRIPTORS 1
+#define PARSE_C_DESCRIPTORS 0
 #define COPY_BUFFERS 0
 
 void memcpy64(void *dest, const void *src, size_t size) {
@@ -133,7 +133,7 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 	uint32_t header0 = mu32[h++];
 	uint32_t header1 = mu32[h++];
 
-	int num_x_descriptors = (header0 >> 16) & 0xF;
+	int num_x_rq_descriptors = (header0 >> 16) & 0xF;
 	int num_a_descriptors = (header0 >> 20) & 0xF;
 	int num_b_descriptors = (header0 >> 24) & 0xF;
 	int num_w_descriptors = (header0 >> 28) & 0xF;
@@ -150,7 +150,7 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 	uint64_t addr = 0;
 	uint64_t size = 0;
 
-	for(int i = 0; i < num_x_descriptors; i++) {
+	for(int i = 0; i < num_x_rq_descriptors; i++) {
 		uint32_t *field = &(mu32[h++]);
 		uint32_t *lower = &(mu32[h++]);
 
@@ -199,6 +199,36 @@ uint64_t mitm(void *this, void *message, struct PointerAndSize *pas, uint32_t pi
 		memcpy64(state->rs_buffer, tls, 0x100); // save outgoing response
 		send_message(writer, 3, (uint64_t) this, state->rs_buffer, 0x100); // OpenResponse
 
+		uint32_t *mu32 = (uint32_t*) state->rs_buffer;
+		int h = 0;
+		
+		uint32_t header0 = mu32[h++];
+		uint32_t header1 = mu32[h++];
+
+		int num_x_rs_descriptors = (header0 >> 16) & 0xF;
+		for(int i = 0; i < num_x_rs_descriptors; i++) {
+			uint32_t *field = &(mu32[h++]);
+			uint32_t *lower = &(mu32[h++]);
+
+			if(PARSE_X_DESCRIPTORS) {
+				addr = 0;
+				size = 0;
+			
+				addr|= *lower;
+				addr|= (((uint64_t) *field >> 6) & 0b111) << 36;
+				addr|= (((uint64_t) *field >> 12) & 0b1111) << 32;
+			
+				size = *field >> 16;
+
+				if(addr != 0 && size != 0) {
+					if(COPY_BUFFERS) {
+						memcpy64(state->buffer_copy_area, (void*) addr, size);
+					}
+					send_message(writer, 1, i, COPY_BUFFERS ? state->buffer_copy_area : addr, size); // AppendXDescriptor
+				}
+			}
+		}
+		
 		for(int i = 0; i < num_b_descriptors; i++) {
 			if(PARSE_B_DESCRIPTORS) {
 				size = mu32[h+0];
@@ -280,7 +310,8 @@ void send_message(session_h s, uint32_t cmd, uint64_t arg, void *buffer_data, si
 	messageu32[10] = cmd;
 	*((uint64_t*) &messageu32[12]) = arg;
 
-	if(svcSendSyncRequest(s) != RESULT_OK) { svcBreak(0, 0, 0); }
+	result_t r = svcSendSyncRequest(s);
+	if(r != RESULT_OK) { svcBreak(r, 0, 0); }
 }
 
 session_h get_proxy_service(state_t *state) {
