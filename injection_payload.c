@@ -44,21 +44,8 @@ def_mitm(4);
 def_mitm(5);
 def_mitm(6);
 def_mitm(7);
-def_mitm(8);
-def_mitm(9);
-def_mitm(10);
-def_mitm(11);
-def_mitm(12);
-def_mitm(13);
-def_mitm(14);
-def_mitm(15);
 
-const void *mitm_funcs[] = {
-	mitm0, mitm1, mitm2, mitm3,
-	mitm4, mitm5, mitm6, mitm7,
-	mitm8, mitm9, mitm10, mitm11,
-	mitm12, mitm13, mitm14, mitm15,
-};
+const int NUM_LOGGERS = 8;
 
 typedef uint64_t (*dispatch_fptr)(void*, void*, struct PointerAndSize*);
 
@@ -72,7 +59,7 @@ typedef struct state_t {
 	bool has_initialized;
 	void *tls;
 	session_h proxy_service; // ilia::IProxyService
-	logger_t loggers[ARRAY_LENGTH(mitm_funcs)];
+	logger_t loggers[NUM_LOGGERS];
 	uint64_t rq_buffer[0x100/sizeof(uint64_t)];
 #ifdef LOG_RESPONSES
 	uint64_t rs_buffer[0x100/sizeof(uint64_t)];

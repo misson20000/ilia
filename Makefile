@@ -7,6 +7,8 @@ include $(LIBTRANSISTOR_HOME)/libtransistor.mk
 ILIA_OBJECTS := IMessageWriter.o IProxyService.o Ilia.o pcapng.o util.o ilia.squashfs.o Process.o Pipe.o
 LIBIBERTY_OBJECTS := cp-demangle.o
 
+ILIA_CXX_FLAGS := -g -Og
+
 INJECTION_LD_FLAGS := -Bsymbolic --gc-sections --no-undefined -T injection_link.T -L $(LIBTRANSISTOR_HOME)/lib/
 INJECTION_CC_FLAGS := -g -fPIE -ffunction-sections -ffreestanding -fno-exceptions -fno-stack-protector -target aarch64-none-linux-gnu -Oz -mtune=cortex-a53 -nostdlib -nostdlibinc $(SYS_INCLUDES)
 

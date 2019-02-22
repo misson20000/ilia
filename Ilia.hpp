@@ -21,7 +21,7 @@ class Ilia {
    trn::ipc::server::IPCServer server;
    std::map<uint64_t, Process> processes;
    std::vector<uint8_t> injection_payload;
-   uint32_t mitm_func_offsets[16];
+   uint32_t mitm_func_offsets[8];
    
    trn::ResultCode InterceptAll(std::string interface);
    
