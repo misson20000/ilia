@@ -14,28 +14,25 @@
 
 #include "err.hpp"
 #include "pcapng.hpp"
-#include "Pipe.hpp"
 #include "util.hpp"
-#include "IMessageWriter.hpp"
-#include "IProxyService.hpp"
+
+#include "Process.hpp"
+#include "InterfaceSniffer.hpp"
 
 int main(int argc, char *argv[]) {
    try {
       ilia::Ilia ilia;
-      const char *ifaces[] = {
-         "nn::am::service::IAllSystemAppletProxiesService",
-         "nn::am::service::ILibraryAppletProxy",
-         "nn::am::service::ILibraryAppletSelfAccessor",
-         "nn::am::service::ILibraryAppletCreator",
-         "nn::am::service::ILibraryAppletAccessor",
-         "nn::am::service::IStorage",
-         "nn::am::service::IStorageAccessor",
-      };
-      for(uint32_t i = 0; i < ARRAY_LENGTH(ifaces); i++) {
-         fprintf(stderr, "intercepting %s...\n", ifaces[i]);
-         trn::ResultCode::AssertOk(ilia.InterceptAll(ifaces[i]).code);
-      }
-      fprintf(stderr, "done intercepting\n");
+
+      trn::service::SM sm = trn::ResultCode::AssertOk(trn::service::SM::Initialize());
+      trn::ipc::client::Object ldr_dmnt = trn::ResultCode::AssertOk(
+         sm.GetService("ldr:dmnt"));
+      
+      ilia::Process ns(ilia, 0x5b);
+      ns.ScanSTables(ldr_dmnt);
+      auto a = ns.Sniff("nn::ovln::IReceiverService");
+      auto b = ns.Sniff("nn::ovln::IReceiver");
+      ns.Begin();
+      
       while(!ilia.destroy_flag) {
          trn::ResultCode::AssertOk(ilia.event_waiter.Wait(3000000000));
       }
@@ -52,21 +49,7 @@ namespace ilia {
 
 Ilia::Ilia() :
    pcap_writer(),
-   event_waiter(),
-   server(trn::ResultCode::AssertOk(trn::ipc::server::IPCServer::Create(&event_waiter))) {
-
-   server.CreateService("ilia", [this](auto s) {
-         fprintf(stderr, "something is connecting to ilia\n");
-         return new ilia::IProxyService(s, this);
-      });
-
-   auto injection_payload_result = util::ReadFile("/squash/injection_payload.bin");
-   if(!injection_payload_result) {
-      throw trn::ResultError(ILIA_ERR_IO_ERROR);
-   }
-   this->injection_payload = *injection_payload_result;
-   memcpy(mitm_func_offsets, injection_payload.data(), sizeof(mitm_func_offsets));
-   
+   event_waiter() {
    static const char shb_hardware[] = "Nintendo Switch";
 	static const char shb_os[] = "Horizon";
 	static const char shb_userappl[] = "ilia";
@@ -77,10 +60,9 @@ Ilia::Ilia() :
 		{.code = 0, .length = 0, .value = 0}
 	};
 	pcap_writer.WriteSHB(shb_options);
-
-   ProbeProcesses();
 }
 
+/*
 void Ilia::ProbeProcesses() {
    uint64_t pids[256];
 	uint32_t num_pids;
@@ -124,5 +106,6 @@ trn::ResultCode Ilia::InterceptAll(std::string interface_name) {
    
    return trn::ResultCode(RESULT_OK);
 }
+*/
 
 } // namespace ilia

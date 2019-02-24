@@ -1,103 +1,145 @@
 #pragma once
 
-#include<libtransistor/cpp/types.hpp>
-#include<libtransistor/cpp/ipcclient.hpp>
-#include<libtransistor/cpp/svc.hpp>
-
-#include<libtransistor/util.h>
+#include<libtransistor/cpp/nx.hpp>
 
 #include<memory>
 #include<vector>
 #include<list>
+#include<deque>
+#include<map>
 
-#include "Pipe.hpp"
+#include "DebugTypes.hpp"
 
 namespace ilia {
 
-class Process;
-class STable;
+class Ilia;
+class InterfaceSniffer;
 
 class Process {
-  public:
-   Process(Ilia *ilia,
-           trn::ipc::client::Object &ldr_dmnt,
-           trn::KProcess proc,
-           uint64_t pid);
-   Process(const Process&) = delete; // disable copy constructor, because we make objects that point to us
-   
-   template<typename T>
-   class RemoteValue {
-     public:
-      RemoteValue(std::shared_ptr<trn::svc::MemoryMapping> map, uint64_t offset) : map(map), offset(offset) {
-      }
+ public:
+	Process(Ilia &ilia,
+					uint64_t pid);
+	Process(const Process&) = delete; // disable copy constructor, because we make objects that point to us
 
-      T operator*() {
-         return *((T*) (map->Base() + offset));
-      }
+	class Thread {
+	 public:
+		Thread(Process &process, uint64_t id, uint64_t tls, uint64_t entrypoint);
+		Process &process;
+		const uint64_t thread_id;
+		const uint64_t tls;
+		const uint64_t entrypoint;
 
-      T operator=(T val) {
-         return *((T*) (map->Base() + offset)) = val;
-      }
+		nx::ThreadContext GetContext();
+		void SetContext(nx::ThreadContext &ctx);
+		
+		// for use as map key
+		bool operator<(const Thread &rhs) const;
+	};
+	
+	class NSO {
+	 public:
+		NSO(Process &process, uint64_t base, uint64_t size);
+		Process &process;
+		const uint64_t base;
+		const size_t size;
+	};
 
-      T &operator[](size_t index) {
-         return *(((T*) (map->Base() + offset)) + index);
-      }
+	class STable {
+	 public:
+		STable(Process &process, NSO &nso, std::string interface_name, uint64_t addr);
+		Process &process;
+		NSO &nso;
+		const std::string interface_name;
+		const uint64_t addr;
+	};
+
+	class Trap {
+	 public:
+		Trap(Process &process, std::function<void(Thread&)> cb);
+		Trap(const Trap &other) = delete;
+		Trap(Trap &&other) = delete;
+		virtual ~Trap();
+
+		Trap &operator=(const Trap &other) = delete;
+		Trap &operator=(Trap &&other) = delete;
+		
+		const uint64_t trap_addr;
+		void Hit(Thread &thread);
+	 protected:
+		Process &process;
+		std::function<void(Thread&)> cb;
+	};
+	   
+	Ilia &ilia;
+	uint64_t pid;
+	trn::KDebug debug;
+	bool has_attached = false;
+	bool has_scanned = false;
+	bool pending_begin = false;
+
+	void ScanSTables(trn::ipc::client::Object &ldr_dmnt);
+	std::unique_ptr<InterfaceSniffer> Sniff(const char *name);
+	void Begin();
+
+	template<typename T>
+	class RemotePointer {
+	 public:
+		RemotePointer(trn::KDebug &debug, uint64_t address) : debug(debug), addr(address) {
+		}
+
+		T operator*() {
+			T val;
+			trn::ResultCode::AssertOk(
+				trn::svc::ReadDebugProcessMemory((uint8_t*) &val, debug, addr, sizeof(val)));
+			return val;
+		}
+
+		T operator=(T val) {
+			trn::ResultCode::AssertOk(
+				trn::svc::WriteDebugProcessMemory(debug, (uint8_t*) &val, addr, sizeof(val)));
+			return val;
+		}
+
+		T operator[](size_t index) {
+			T val;
+			trn::ResultCode::AssertOk(
+				trn::svc::ReadDebugProcessMemory((uint8_t*) &val, debug, addr + (sizeof(val) * index), sizeof(val)));
+			return val;
+		}
       
-     private:
-      std::shared_ptr<trn::svc::MemoryMapping> map;
-      uint64_t offset;
-   };
+	 private:
+		trn::KDebug &debug;
+		uint64_t addr;
+	};
+	
+	template<typename T>
+	T Read(uint64_t addr) {
+		return *RemotePointer<T>(debug, addr);
+	}
 
-   class NSO {
-     public:
-      Process *process;
-      uint64_t base;
-      size_t size;
-      bool has_injected_payload = false;
-      
-      void InjectPayload();
-   };
-      
-   uint64_t pid;
-   std::shared_ptr<trn::KProcess> proc;
-   std::vector<NSO> nsos;
-   std::list<STable> s_tables;
-   std::vector<Pipe> pipes;
-   Ilia *ilia;
-   
-   template<typename T> RemoteValue<T> Access(uint64_t addr, size_t count) {
-      uint64_t aligned_addr = addr & ~0xfff;
-      uint64_t end = addr + (sizeof(T) * count);
-      uint64_t size = end - aligned_addr;
-      uint64_t aligned_size = (size + 0xfff) & ~0xfff;
-      auto r = trn::svc::MapProcessMemory(this->proc, aligned_addr, aligned_size);
-      while(!r && r.error().code == 0xdc01) {
-         fprintf(stderr, "looping on 0xdc01\n");
-         svcSleepThread(100000);
-         r = trn::svc::MapProcessMemory(this->proc, aligned_addr, aligned_size);
-      }
-      if(!r) {
-         throw new trn::ResultError(r.error());
-      }
-      return RemoteValue<T>(*r,
-                            addr - aligned_addr);
-   }
-   template<typename T> RemoteValue<T> Access(uint64_t addr) { return Access<T>(addr, 1); }
+	template<typename T>
+	RemotePointer<T> Access(uint64_t addr) {
+		return RemotePointer<T>(debug, addr);
+	}
+	
+ private:
+	std::vector<NSO> nsos;
+	std::map<std::string, STable> s_tables;
+	
+	std::map<uint64_t, Thread> threads;
+	std::vector<Trap*> traps;
+	std::deque<size_t> trap_free_list;
+	static const uint64_t TrapBaseAddress = 0xBAD0000000000000; // near top of address space
+	static const size_t TrapSize = 4; // one instruction
 
-   void HexDump(uint64_t addr, size_t size) {
-      RemoteValue<uint8_t> buf = Access<uint8_t>(addr, size);
-      hexdump(&buf[0], size);
-   }
-};
-
-class STable {
-  public:
-   Process *process;
-   Process::NSO *nso;
-   std::string interface_name;
-   uint64_t addr;
-   uint64_t original_value;
-};
-
+	size_t LookupTrap(uint64_t addr);
+	uint64_t TrapAddress(size_t index);
+	
+	std::shared_ptr<trn::WaitHandle> wait_handle;
+	
+	void HandleEvents();
+	uint64_t RegisterTrap(Trap &t); // returns trap address
+	void UnregisterTrap(Trap &t);
+}; // class Process
 
 } // namespace ilia
