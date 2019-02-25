@@ -30,9 +30,7 @@ int main(int argc, char *argv[]) {
       ilia::Process ns(ilia, 0x5b);
       ns.ScanSTables(ldr_dmnt);
       auto a = ns.Sniff("nn::ovln::IReceiverService");
-      auto b = ns.Sniff("nn::ovln::IReceiver");
-      ns.Begin();
-      
+      auto b = ns.Sniff("nn::ovln::IReceiver");      
       while(!ilia.destroy_flag) {
          trn::ResultCode::AssertOk(ilia.event_waiter.Wait(3000000000));
       }

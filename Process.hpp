@@ -29,11 +29,16 @@ class Process {
 		const uint64_t tls;
 		const uint64_t entrypoint;
 
-		nx::ThreadContext GetContext();
-		void SetContext(nx::ThreadContext &ctx);
+		nx::ThreadContext &GetContext();
+		void CommitContext();
+		void InvalidateContext();
 		
 		// for use as map key
 		bool operator<(const Thread &rhs) const;
+	 private:
+		bool is_context_dirty = false;
+		bool is_context_valid = false;
+		nx::ThreadContext context;
 	};
 	
 	class NSO {
@@ -94,7 +99,7 @@ class Process {
 			return val;
 		}
 
-		T operator=(T val) {
+		T operator=(const T &val) {
 			trn::ResultCode::AssertOk(
 				trn::svc::WriteDebugProcessMemory(debug, (uint8_t*) &val, addr, sizeof(val)));
 			return val;
@@ -106,10 +111,10 @@ class Process {
 				trn::svc::ReadDebugProcessMemory((uint8_t*) &val, debug, addr + (sizeof(val) * index), sizeof(val)));
 			return val;
 		}
-      
+
+		const uint64_t addr;
 	 private:
 		trn::KDebug &debug;
-		uint64_t addr;
 	};
 	
 	template<typename T>

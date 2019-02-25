@@ -41,15 +41,26 @@ Process::Thread::Thread(Process &process, uint64_t id, uint64_t tls, uint64_t en
 	entrypoint(entrypoint) {
 }
 
-nx::ThreadContext Process::Thread::GetContext() {
-	thread_context_t context = ResultCode::AssertOk(
-		svc::GetDebugThreadContext(process.debug, thread_id, 15));
-	return *((nx::ThreadContext*) (&context)); // whoosh
+nx::ThreadContext &Process::Thread::GetContext() {
+	if(!is_context_valid) {
+		*((thread_context_t*) (&context)) = ResultCode::AssertOk(
+			svc::GetDebugThreadContext(process.debug, thread_id, 15));
+		is_context_valid = true;
+	}
+	is_context_dirty = true;
+	return context;
 }
 
-void Process::Thread::SetContext(nx::ThreadContext &ctx) {
-	ResultCode::AssertOk(
-		svc::SetDebugThreadContext(process.debug, thread_id, (thread_context_t*) &ctx, 3));
+void Process::Thread::CommitContext() {
+	if(is_context_dirty) {
+		ResultCode::AssertOk(
+			svc::SetDebugThreadContext(process.debug, thread_id, (thread_context_t*) &context, 3));
+		is_context_dirty = false;
+	}
+}
+
+void Process::Thread::InvalidateContext() {
+	is_context_valid = false;
 }
 
 bool Process::Thread::operator<(const Thread &rhs) const {
@@ -90,14 +101,6 @@ std::unique_ptr<InterfaceSniffer> Process::Sniff(const char *name) {
 	}
 
 	return std::make_unique<InterfaceSniffer>(ilia, i->second);
-}
-
-void Process::Begin() {
-	fprintf(stderr, "begin\n");
-	HandleEvents();
-	ResultCode::AssertOk(
-		svc::ContinueDebugEvent(debug, 7, nullptr, 0));
-	fprintf(stderr, "began\n");
 }
 
 void Process::HandleEvents() {
@@ -155,9 +158,7 @@ void Process::HandleEvents() {
 				} else {
 					fprintf(stderr, "hitting trap 0x%lx\n", index);
 					traps[index]->Hit(i->second);
-					fprintf(stderr, "done hitting trap, continuing...\n");
-					ResultCode::AssertOk(
-						svc::ContinueDebugEvent(debug, 7, nullptr, 0));
+					fprintf(stderr, "done hitting trap.\n");
 				}
 				break; }
 			case nx::DebugEvent::ExceptionType::DebuggerAttached: {
@@ -165,18 +166,25 @@ void Process::HandleEvents() {
 				break; }
 			default:
 				fprintf(stderr, "ERROR: unhandled exception\n");
-				break;
+				return;
 			}
 			break; }
 		default:
 			fprintf(stderr, "ERROR: unknown debug event?\n");
-			break;
+			return;
 		}
 	}
 	
 	if(r.error().code != 0x8c01) { // no events left
 		throw r.error();
 	}
+
+	for(auto &i : threads) {
+		i.second.CommitContext();
+		i.second.InvalidateContext();
+	}
+	ResultCode::AssertOk(
+		svc::ContinueDebugEvent(debug, 7, nullptr, 0));
 }
 
 uint64_t Process::RegisterTrap(Trap &t) {
