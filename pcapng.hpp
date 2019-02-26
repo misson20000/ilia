@@ -16,6 +16,7 @@ const uint32_t SHB_OS = 3;
 const uint32_t SHB_USERAPPL = 4;
 
 const uint32_t LINKTYPE_USER0 = 147; // HIPC message
+const uint32_t LINKTYPE_USER1 = 148; // CMIF message
 
 class Writer {
   public:

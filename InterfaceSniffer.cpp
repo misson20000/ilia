@@ -1,5 +1,9 @@
 #include "InterfaceSniffer.hpp"
 
+#include<experimental/array>
+
+#include "Buffer.hpp"
+
 namespace ilia {
 
 /*
@@ -21,6 +25,13 @@ struct nn::sf::cmif::server::CmifServerMessage::vtable {
 
 InterfaceSniffer::InterfaceSniffer(Ilia &ilia, Process::STable &s_table) :
 	ilia(ilia),
+	interface_id(
+		ilia.pcap_writer.WriteIDB(
+			pcapng::LINKTYPE_USER1, 0,
+			std::experimental::make_array(
+				pcapng::Option {.code = 2, .length = (uint16_t) (s_table.interface_name.length() + 1), .value = s_table.interface_name.c_str()},
+				pcapng::Option {.code = 0, .length = 0, .value = nullptr}
+				).data())),
 	s_table(s_table),
 	s_table_trap(s_table.process, s_table.addr, *this) {
 	fprintf(stderr, "made interface sniffer for %s\n", s_table.interface_name.c_str());
@@ -34,17 +45,67 @@ InterfaceSniffer::MessageContext::MessageContext(
 	Process::RemotePointer<nn::sf::detail::PointerAndSize> pas) :
 	CommonContext<InterfaceSniffer>(sniffer, thread),
 	message(message),
+	rq_pas(*pas),
+	rq_data(rq_pas.size),
 	vtable(*this, thread.process, (*message).vtable),
 	holder(thread, vtable.trap_vtable) {
-	fprintf(stderr, "creating message handling context for thread 0x%lx\n", thread.thread_id);
-	fprintf(stderr, "poisoning vtable (vt = 0x%lx)...\n", holder.addr);
-	message = {holder.addr};
+	fprintf(stderr, "entering message handling context for thread 0x%lx\n", thread.thread_id);
+	process.ReadBytes(rq_data, rq_pas.pointer);
+	message = {holder.addr}; // poison vtable
+}
+
+enum class ChunkType : uint8_t {
+	RequestPas,
+	RequestData,
+	MetaInfo,
+	ResponsePas,
+	ResponseData,
+};
+
+static void AddChunk(util::Buffer &message, ChunkType type, util::Buffer &chunk) {
+	message.Write<ChunkType>(type);
+	message.Write<size_t>(chunk.ReadAvailable());
+	chunk.Read(message, chunk.ReadAvailable());
+}
+
+template<typename T>
+static void MakeChunk(util::Buffer &message, ChunkType type, T &t) {
+	message.Write<ChunkType>(type);
+	message.Write<size_t>(sizeof(T));
+	message.Write(t);
 }
 
 InterfaceSniffer::MessageContext::~MessageContext() {
 	fprintf(stderr, "leaving message handling context for thread 0x%lx\n", thread.thread_id);
-	message = {vtable.real_vtable_addr};
+	message = {vtable.real_vtable_addr}; // restore vtable
 	owner.ilia.destroy_flag = true;
+
+	// commit message
+
+	util::Buffer message;
+	{ // RequestPas
+		util::Buffer chunk;
+		chunk.Write<uint64_t>(rq_pas.pointer);
+		chunk.Write<uint64_t>(rq_pas.size);
+		AddChunk(message, ChunkType::RequestPas, chunk);
+	}
+	{ // RequestData
+		MakeChunk(message, ChunkType::RequestData, rq_data);
+	}
+	if(meta_info) { // MetaInfo
+		MakeChunk(message, ChunkType::MetaInfo, *meta_info);
+	}
+	if(rs_pas) { // ResponsePas
+		util::Buffer chunk;
+		chunk.Write<uint64_t>(rs_pas->pointer);
+		chunk.Write<uint64_t>(rs_pas->size);
+		AddChunk(message, ChunkType::ResponsePas, chunk);
+	}
+	if(rs_data) { // ResponseData
+		MakeChunk(message, ChunkType::ResponseData, *rs_data);
+	}
+
+	owner.ilia.pcap_writer.WriteEPB(owner.interface_id, 0, message.ReadAvailable(), message.ReadAvailable(), message.Read(), nullptr);
 }
 
 InterfaceSniffer::MessageContext::PrepareForProcess::PrepareForProcess(
@@ -53,11 +114,31 @@ InterfaceSniffer::MessageContext::PrepareForProcess::PrepareForProcess(
 	uint64_t _this,
 	Process::RemotePointer<nn::sf::cmif::CmifMessageMetaInfo> info) :
 	CommonContext<MessageContext>(ctx, thread) {
-	fprintf(stderr, "entering PrepareForProcess(0x%lx, 0x%lx)\n", _this, info.addr);
+	owner.meta_info.emplace(*info);
 }
 
-InterfaceSniffer::MessageContext::PrepareForProcess::~PrepareForProcess() {
-	fprintf(stderr, "exiting PrepareForProcess\n");
+InterfaceSniffer::MessageContext::BeginPreparingForReply::BeginPreparingForReply(
+	MessageContext &ctx,
+	Process::Thread &thread,
+	uint64_t _this,
+	Process::RemotePointer<nn::sf::detail::PointerAndSize> pas) :
+	CommonContext<MessageContext>(ctx, thread),
+	pas(pas) {
+}
+
+InterfaceSniffer::MessageContext::BeginPreparingForReply::~BeginPreparingForReply() {
+	owner.rs_pas.emplace(*pas);
+}
+
+InterfaceSniffer::MessageContext::EndPreparingForReply::EndPreparingForReply(
+	MessageContext &ctx,
+	Process::Thread &thread,
+	uint64_t _this) :
+	CommonContext<MessageContext>(ctx, thread) {
+	if(owner.rs_pas) {
+		owner.rs_data.emplace(owner.rs_pas->size);
+		process.ReadBytes(*owner.rs_data, owner.rs_pas->pointer);
+	}
 }
 
 } // namespace ilia

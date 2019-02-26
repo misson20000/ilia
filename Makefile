@@ -4,10 +4,10 @@ ifndef LIBTRANSISTOR_HOME
 endif
 include $(LIBTRANSISTOR_HOME)/libtransistor.mk
 
-ILIA_OBJECTS := Ilia.o Process.o InterfaceSniffer.o pcapng.o util.o
+ILIA_OBJECTS := Ilia.o Process.o InterfaceSniffer.o Buffer.o pcapng.o util.o
 LIBIBERTY_OBJECTS := cp-demangle.o
 
-ILIA_CXX_FLAGS := -g -Og
+ILIA_CXX_FLAGS := -g -Og -I vendor
 
 LIBIBERTY_CC_FLAGS := -I libiberty/include/ -DHAVE_STDLIB_H -DHAVE_STRING_H -DHAVE_ALLOCA_H -DHAVE_LIMITS_H
 

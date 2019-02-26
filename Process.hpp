@@ -126,6 +126,59 @@ class Process {
 	RemotePointer<T> Access(uint64_t addr) {
 		return RemotePointer<T>(debug, addr);
 	}
+
+	void ReadBytes(std::vector<uint8_t> &buf, uint64_t addr) {
+		trn::ResultCode::AssertOk(
+			trn::svc::ReadDebugProcessMemory(buf.data(), debug, addr, buf.size()));
+	}
+	
+	void HexDump(std::string header, uint64_t addr, size_t size) {
+		std::vector<uint8_t> buf(size);
+		ReadBytes(buf, size);
+
+		std::string line;
+		size_t position = 0;
+		while(position < size) {
+			size_t linestart = position;
+			line = header;
+			
+			// hexdump section
+			while(position < linestart + 0x10) {
+				if(position < size) {
+					uint8_t byte = buf[position++];
+					line.push_back(nybble2hex(byte >> 4));
+					line.push_back(nybble2hex(byte & 15));
+					line.push_back(' ');
+				} else {
+					position++;
+					line+= "   ";
+				}
+				if(position == linestart + 0x8) { line.push_back(' '); }
+			}
+
+			line+= " |  ";
+
+			position = linestart;
+    
+			while(position < linestart + 0x10) {
+				if(position < size) {
+					uint8_t ch = buf[position++];
+					if(ch >= ' ' && ch < 0x7F) {
+						line.push_back(ch);
+					} else {
+						line.push_back('.');
+					}
+				} else {
+					position++;
+					line.push_back(' ');
+				}
+			}
+
+			line.push_back('\n');
+			
+			fputs(line.c_str(), stderr);
+		}
+	}
 	
  private:
 	std::vector<NSO> nsos;
