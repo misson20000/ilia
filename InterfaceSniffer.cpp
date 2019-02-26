@@ -43,7 +43,6 @@ InterfaceSniffer::MessageContext::MessageContext(
 
 InterfaceSniffer::MessageContext::~MessageContext() {
 	fprintf(stderr, "leaving message handling context for thread 0x%lx\n", thread.thread_id);
-	fprintf(stderr, "restoring poisoned vtable\n");
 	message = {vtable.real_vtable_addr};
 	owner.ilia.destroy_flag = true;
 }

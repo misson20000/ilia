@@ -146,7 +146,6 @@ void Process::HandleEvents() {
 			switch(event.exception.exception_type) {
 			case nx::DebugEvent::ExceptionType::InstructionAbort: {
 				uint64_t far = event.exception.fault_register;
-				fprintf(stderr, "got instruction abort at 0x%lx\n", far);
 				auto i = threads.find(event.thread_id);
 				if(i == threads.end()) {
 					fprintf(stderr, "ERROR: no such thread 0x%lx\n", event.thread_id);
@@ -156,9 +155,7 @@ void Process::HandleEvents() {
 				if(traps[index] == nullptr) {
 					fprintf(stderr, "ERROR: no such trap 0x%lx\n", index);
 				} else {
-					fprintf(stderr, "hitting trap 0x%lx\n", index);
 					traps[index]->Hit(i->second);
-					fprintf(stderr, "done hitting trap.\n");
 				}
 				break; }
 			case nx::DebugEvent::ExceptionType::DebuggerAttached: {

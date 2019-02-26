@@ -34,7 +34,6 @@ class FunctionTrap {
 	}
 	
 	void Enter(Process::Thread &t) {
-		fprintf(stderr, "entering function pointer trap\n");
 		auto i = contexts.find(t);
 		if(i != contexts.end()) {
 			throw ResultError(ILIA_ERR_NON_REENTRANT);
@@ -44,8 +43,6 @@ class FunctionTrap {
 		uint64_t ret = ctx.x[30];
 		ctx.x[30] = exit_trap.trap_addr;
 		ctx.pc = target_addr;
-		fprintf(stderr, "  return to: 0x%lx, trapping x30 to 0x%lx...\n", ret, exit_trap.trap_addr);
-		fprintf(stderr, "  warping pc to original function 0x%lx...\n", target_addr);
 		contexts.emplace( // this is really dumb
 			std::piecewise_construct,
 			std::make_tuple(t),
@@ -53,7 +50,6 @@ class FunctionTrap {
 	}
 	
 	void Exit(Process::Thread &t) {
-		fprintf(stderr, "exiting function pointer trap\n");
 		auto i = contexts.find(t);
 		if(i == contexts.end()) {
 			throw ResultError(ILIA_ERR_INVALID_TRAP_STATE);
@@ -61,7 +57,6 @@ class FunctionTrap {
 		
 		nx::ThreadContext &ctx = t.GetContext();
 		ctx.pc = i->second.return_address;
-		fprintf(stderr, "  restoring pc to saved x30: 0x%lx...\n", i->second.return_address);
 		contexts.erase(i);
 	}
 
@@ -92,16 +87,10 @@ class FunctionPointerTrap : public FunctionTrap<Context, Arg> {
 	FunctionPointerTrap(Process &process, uint64_t ptr, Arg &arg) :
 		FunctionTrap<Context, Arg>(process, process.Read<uint64_t>(ptr), arg),
 		function_pointer(ptr) {
-		fprintf(
-			stderr, "installing function pointer trap ([0x%lx] 0x%lx -> 0x%lx)\n",
-			ptr, this->target_addr, this->entry_trap_addr);
 		process.Access<uint64_t>(ptr) = this->entry_trap_addr;
 	}
 
 	~FunctionPointerTrap() {
-		fprintf(
-			stderr, "uninstalling function pointer trap ([0x%lx] 0x%lx -> 0x%lx)\n",
-			function_pointer, this->entry_trap_addr, this->target_addr);
 		this->process.template Access<uint64_t>(function_pointer) = this->target_addr;
 	}
  private:
@@ -145,7 +134,6 @@ class VTableTrap {
 		real_vtable(process.Read<VTableType>(real_vtable_addr)),
 		traps(std::tuple<Process&, uint64_t, T&>(process, real_vtable[I], t)...),
 		trap_vtable {(std::get<I>(traps).entry_trap_addr)...} {
-		(fprintf(stderr, "  fake_vt[%lu] = 0x%lx\n", I, trap_vtable[I]),...);
 	}
 };
 
@@ -155,11 +143,9 @@ class StackHolder {
 	StackHolder(Process::Thread &thread, const T &t) :
 		thread(thread),
 		addr(thread.GetContext().sp-= sizeof(T)) {
-		fprintf(stderr, "allocated 0x%lx bytes from stack\n", sizeof(T));
 		thread.process.Access<T>(addr) = t;
 	}
 	~StackHolder() {
-		fprintf(stderr, "restoring stack\n");
 		thread.GetContext().sp+= sizeof(T);
 	}
 	const uint64_t addr;
