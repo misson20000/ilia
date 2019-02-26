@@ -13,7 +13,7 @@ class InterfaceSniffer;
 
 class Ilia {
   public:
-   Ilia();
+   Ilia(FILE *pcap);
    
    bool destroy_flag = false;
    pcapng::Writer pcap_writer;

@@ -16,7 +16,7 @@
 namespace ilia {
 namespace pcapng {
 
-Writer::Writer() {
+Writer::Writer(FILE *file) : file(file) {
 }
 
 void Writer::OpenBlock(uint32_t block_type) {
@@ -28,9 +28,10 @@ void Writer::CommitBlock() {
    block_buffer.insert(block_buffer.end(), 4, 0);
    ((uint32_t*) block_buffer.data())[1] = block_buffer.size();
    *((uint32_t*) (block_buffer.data() + block_buffer.size() - 4)) = block_buffer.size();
-   if(write(STDOUT_FILENO, block_buffer.data(), block_buffer.size()) != block_buffer.size()) {
+   if(fwrite(block_buffer.data(), 1, block_buffer.size(), file) != block_buffer.size()) {
       throw trn::ResultError(ILIA_ERR_IO_ERROR);
    }
+   fflush(file);
 }
 
 void Writer::AppendToBlock(const uint8_t *data, size_t size) {

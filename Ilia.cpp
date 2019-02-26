@@ -8,9 +8,11 @@
 #include<libtransistor/util.h>
 #include<libtransistor/svc.h>
 
+#include<unistd.h>
 #include<stdio.h>
 #include<string.h>
 #include<malloc.h>
+#include<fcntl.h>
 
 #include "ini.h"
 
@@ -94,9 +96,31 @@ static int IniValueHandler(void *user, void *section_context, const char *name, 
 	return 1;
 }
 
+class Time {
+ public:
+	Time() {
+		ResultCode::AssertOk(time_init());
+	}
+	~Time() {
+		time_finalize();
+	}
+	uint64_t GetCurrentTime() {
+		uint64_t t;
+		ResultCode::AssertOk(time_system_clock_get_current_time(time_system_clock_local, &t));
+		return t;
+	}
+};
+
 int main(int argc, char *argv[]) {
 	try {
-		ilia::Ilia ilia;
+		Time t;
+		char fname[301];
+		time_t time = t.GetCurrentTime();
+		strftime(fname, sizeof(fname)-1, "/sd/ilia_%F_%H-%M-%S.pcapng", gmtime(&time));
+		fprintf(stderr, "opening '%s'...\n", fname);
+		FILE *log = fopen(fname, "wb");
+		
+		ilia::Ilia ilia(log);
 
 		FILE *f = fopen("/sd/ilia.ini", "r");
 		if(!f) {
@@ -124,8 +148,8 @@ int main(int argc, char *argv[]) {
 
 namespace ilia {
 
-Ilia::Ilia() :
-	pcap_writer(),
+Ilia::Ilia(FILE *pcap) :
+	pcap_writer(pcap),
 	event_waiter(),
 	sm(trn::ResultCode::AssertOk(trn::service::SM::Initialize())),
 	ldr_dmnt(trn::ResultCode::AssertOk(sm.GetService("ldr:dmnt"))),
