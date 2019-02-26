@@ -89,6 +89,23 @@ public:
 		return false;
 	}
 
+	template<typename T>
+	static size_t Size(T &val) {
+		static_assert(std::is_standard_layout<T>::value, "T must be standard layout");
+		return sizeof(val);
+	}
+
+	template<typename T>
+	static size_t Size(std::vector<T> &vec) {
+		static_assert(std::is_standard_layout<T>::value, "T must be standard layout");
+		return vec.size() * sizeof(T);
+	}
+
+	template<typename T>
+	static size_t Size(std::string &str) {
+		return str.size();
+	}
+   
 	uint8_t *Read();
 	void MarkRead(size_t size);
 

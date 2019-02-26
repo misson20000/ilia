@@ -60,6 +60,7 @@ enum class ChunkType : uint8_t {
 	MetaInfo,
 	ResponsePas,
 	ResponseData,
+	ResultCode,
 };
 
 static void AddChunk(util::Buffer &message, ChunkType type, util::Buffer &chunk) {
@@ -71,18 +72,21 @@ static void AddChunk(util::Buffer &message, ChunkType type, util::Buffer &chunk)
 template<typename T>
 static void MakeChunk(util::Buffer &message, ChunkType type, T &t) {
 	message.Write<ChunkType>(type);
-	message.Write<size_t>(sizeof(T));
+	message.Write<size_t>(util::Buffer::Size(t));
 	message.Write(t);
 }
 
 InterfaceSniffer::MessageContext::~MessageContext() {
 	fprintf(stderr, "leaving message handling context for thread 0x%lx\n", thread.thread_id);
 	message = {vtable.real_vtable_addr}; // restore vtable
-	owner.ilia.destroy_flag = true;
+
+	uint32_t result = (uint32_t) thread.GetContext().x[0];
 
 	// commit message
-
 	util::Buffer message;
+	{ // ResultCode
+		MakeChunk(message, ChunkType::ResultCode, result);
+	}
 	{ // RequestPas
 		util::Buffer chunk;
 		chunk.Write<uint64_t>(rq_pas.pointer);
