@@ -61,6 +61,7 @@ enum class ChunkType : uint8_t {
 	ResponsePas,
 	ResponseData,
 	ResultCode,
+	Buffers,
 };
 
 static void AddChunk(util::Buffer &message, ChunkType type, util::Buffer &chunk) {
@@ -108,6 +109,14 @@ InterfaceSniffer::MessageContext::~MessageContext() {
 	if(rs_data) { // ResponseData
 		MakeChunk(message, ChunkType::ResponseData, *rs_data);
 	}
+	if(buffers) { // Buffers
+		util::Buffer chunk;
+		for(auto &i : *buffers) {
+			chunk.Write<uint64_t>(i.size());
+			chunk.Write(i);
+		}
+		AddChunk(message, ChunkType::Buffers, chunk);
+	}
 
 	owner.ilia.pcap_writer.WriteEPB(owner.interface_id, 0, message.ReadAvailable(), message.ReadAvailable(), message.Read(), nullptr);
 }
@@ -132,6 +141,24 @@ InterfaceSniffer::MessageContext::BeginPreparingForReply::BeginPreparingForReply
 
 InterfaceSniffer::MessageContext::BeginPreparingForReply::~BeginPreparingForReply() {
 	owner.rs_pas.emplace(*pas);
+}
+
+InterfaceSniffer::MessageContext::SetBuffers::SetBuffers(
+	MessageContext &ctx,
+	Process::Thread &thread,
+	uint64_t _this,
+	Process::RemotePointer<nn::sf::detail::PointerAndSize> pas_array) :
+	CommonContext<MessageContext>(ctx, thread) {
+	if(owner.meta_info) {
+		owner.buffers.emplace(owner.meta_info->buffer_count);
+		for(size_t i = 0; i < owner.meta_info->buffer_count; i++) {
+			nn::sf::detail::PointerAndSize pas = pas_array[i];
+			(*owner.buffers)[i].resize(pas.size);
+			process.ReadBytes((*owner.buffers)[i], pas.pointer);
+		}
+	} else {
+		fprintf(stderr, "WARNING: SetBuffers called without PrepareForProcess?\n");
+	}
 }
 
 InterfaceSniffer::MessageContext::EndPreparingForReply::EndPreparingForReply(

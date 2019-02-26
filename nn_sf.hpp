@@ -20,15 +20,13 @@ namespace cmif {
 
 struct CmifMessageMetaInfo {
 	bool has_pid;
-	uint32_t bytes_in;
-	uint32_t p1;
-	uint32_t bytes_out;
-	uint32_t p2;
+	uint64_t bytes_in;
+	uint64_t bytes_out;
 	uint32_t buffer_count;
 	uint32_t in_interfaces;
 	uint32_t out_interfaces;
-	uint32_t p3;
-	uint32_t p4;
+	uint32_t in_handle_count;
+	uint32_t out_handle_count;
 	uint32_t buffers[16];
 	uint32_t in_handles[8];
 	uint32_t out_handles[8];

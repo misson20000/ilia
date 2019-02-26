@@ -1,6 +1,6 @@
 print("Loading CMIF dissector")
 
-cmif = Proto("ilia-cmif", "Command Message InterFace (Nintendo Switch) (ilia-cmif)")
+cmif = Proto("ilia-cmif", "Command Message Interface (Nintendo Switch) (ilia-cmif)")
 
 local pf_rq_magic = ProtoField.string("ilia-cmif.rq.magic", "Request Magic")
 local pf_rq_id = ProtoField.uint32("ilia-cmif.rq.id", "Request ID", base.DEC)
@@ -8,6 +8,8 @@ local pf_rq_raw_params = ProtoField.bytes("ilia-cmif.rq.raw_params", "Raw Data")
 
 local pf_result = ProtoField.uint32("ilia-cmif.result", "Result Code", base.HEX)
 local pf_meta = ProtoField.bytes("ilia-cmif.meta_info", "Message Meta Info")
+local pf_buffer = ProtoField.bytes("ilia-cmif.buffer", "Buffer")
+local pf_buffer_type = ProtoField.uint32("ilia-cmif.buffer_type", "Buffer Type")
 
 local pf_rs_magic = ProtoField.string("ilia-cmif.rs.magic", "Response Magic")
 local pf_rs_code = ProtoField.uint32("ilia-cmif.rs.id", "Response Code", base.HEX)
@@ -20,6 +22,8 @@ cmif.fields = {
 
    pf_result,
    pf_meta,
+   pf_buffer,
+   pf_buffer_type,
    
    pf_rs_magic,
    pf_rs_code,
@@ -40,7 +44,8 @@ function cmif.dissector(buffer, pinfo, tree)
       [2] = "MetaInfo",
       [3] = "ResponsePas",
       [4] = "ResponseData",
-      [5] = "ResultCode"
+      [5] = "ResultCode",
+      [6] = "Buffers"
    }
    local position = 0
    while position < buffer:len() do
@@ -99,4 +104,18 @@ function cmif.dissector(buffer, pinfo, tree)
          transaction_tree:add_le(pf_rs_raw_params, rs_buffer(0x10, bytes_out-0x10))
       end
    end
+
+   if segments.Buffers ~= nil then
+      local index = 0
+      local position = 0
+      local b = segments.Buffers
+      while position < b:len() do
+         local buffer_size = b(position, 4):le_uint()
+         local buffer_tree = transaction_tree:add(pf_buffer, b(position + 8, buffer_size))
+         buffer_tree:add_le(pf_buffer_type, segments.MetaInfo(0x2c + (index * 4), 4))
+         position = position + 8 + buffer_size
+         index = index + 1
+      end
+   end
 end
+

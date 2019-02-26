@@ -39,6 +39,7 @@ class InterfaceSniffer {
 		std::optional<nn::sf::cmif::CmifMessageMetaInfo> meta_info;
 		std::optional<nn::sf::detail::PointerAndSize> rs_pas;
 		std::optional<std::vector<uint8_t>> rs_data;
+		std::optional<std::vector<std::vector<uint8_t>>> buffers;
 		
 		class PrepareForProcess : public CommonContext<MessageContext> {
 			// nn::Result CmifServerMessage::PrepareForProcess(CmifMessageMetaInfo *info);
@@ -55,9 +56,6 @@ class InterfaceSniffer {
 		};
 
 		/*
-		class GetBuffers : public CommonContext<MessageContext>  {
-		};
-		
 		class GetInObjects : public CommonContext<MessageContext>  {
 		};
 		*/
@@ -78,9 +76,20 @@ class InterfaceSniffer {
 			Process::RemotePointer<nn::sf::detail::PointerAndSize> pas;
 		};
 
-		/*
 		class SetBuffers : public CommonContext<MessageContext>  {
+		 public:
+			using Arguments = std::tuple<
+				uint64_t,
+				Process::RemotePointer<nn::sf::detail::PointerAndSize>>;
+
+			SetBuffers(
+				MessageContext &ctx,
+				Process::Thread &thread,
+				uint64_t _this,
+				Process::RemotePointer<nn::sf::detail::PointerAndSize> pas_array);
 		};
+
+		/*
 		class SetOutObjects : public CommonContext<MessageContext>  {
 		};
 		class SetOutNativeHandles : public CommonContext<MessageContext>  {
@@ -107,7 +116,7 @@ class InterfaceSniffer {
 			CommonContext<MessageContext>, // GetInNativeHandles 
 			CommonContext<MessageContext>, // GetInObjects
 			SmartContext<BeginPreparingForReply>, // BeginPreparingForReply
-			CommonContext<MessageContext>, // SetBuffers
+			SmartContext<SetBuffers>, // SetBuffers
 			CommonContext<MessageContext>, // SetOutObjects
 			CommonContext<MessageContext>, // SetOutNativeHandles
 			CommonContext<MessageContext>, // BeginPreparingForErrorReply
