@@ -73,9 +73,8 @@ Process::NSO::NSO(Process &process, uint64_t base, uint64_t size) :
 	size(size) {
 }
 
-Process::STable::STable(Process &process, NSO &nso, std::string interface_name, uint64_t addr) :
+Process::STable::STable(Process &process, std::string interface_name, uint64_t addr) :
 	process(process),
-	nso(nso),
 	interface_name(interface_name),
 	addr(addr) {
 }
@@ -95,12 +94,20 @@ void Process::Trap::Hit(Thread &t) {
 }
 
 std::unique_ptr<InterfaceSniffer> Process::Sniff(const char *name) {
+   if(!has_scanned) {
+      ScanSTables();
+   }
 	auto i = s_tables.find(std::string(name));
 	if(i == s_tables.end()) {
 		throw ResultError(ILIA_ERR_NO_SUCH_S_TABLE);
 	}
 
 	return std::make_unique<InterfaceSniffer>(ilia, i->second);
+}
+
+std::unique_ptr<InterfaceSniffer> Process::Sniff(std::string name, uint64_t addr) {
+   auto i = s_tables.emplace(name, STable(*this, name, addr)).first;
+   return std::make_unique<InterfaceSniffer>(ilia, i->second);
 }
 
 void Process::HandleEvents() {
@@ -220,7 +227,7 @@ uint64_t Process::TrapAddress(size_t index) {
 	return TrapBaseAddress + (index * TrapSize);
 }
 
-void Process::ScanSTables(ipc::client::Object &ldr_dmnt) {
+void Process::ScanSTables() {
 	struct NsoInfo {
 		uint64_t addr;
 		size_t size;
@@ -232,11 +239,28 @@ void Process::ScanSTables(ipc::client::Object &ldr_dmnt) {
 	std::vector<NsoInfo> nso_infos(16, {0, 0, 0});
 	uint32_t num_nsos;
 
-	ResultCode::AssertOk(
-		ldr_dmnt.SendSyncRequest<2>( // GetNsoInfos
-			ipc::InRaw<uint64_t>(pid),
-			ipc::OutRaw<uint32_t>(num_nsos),
-			ipc::Buffer<NsoInfo, 0xA>(nso_infos)));
+   if(pid >= 0x50) {
+		 ResultCode::AssertOk(
+			 ilia.ldr_dmnt.SendSyncRequest<2>( // GetNsoInfos
+				 ipc::InRaw<uint64_t>(pid),
+				 ipc::OutRaw<uint32_t>(num_nsos),
+				 ipc::Buffer<NsoInfo, 0xA>(nso_infos)));
+	 } else {
+		 uint64_t addr = 0;
+		 memory_info_t mi;
+		 while((mi = std::get<0>(ResultCode::AssertOk(svc::QueryDebugProcessMemory(debug, addr)))).memory_type != 3) {
+			 if((uint64_t) mi.base_addr + mi.size < addr) {
+				 fprintf(stderr, "giving up on finding module...\n");
+				 return;
+			 }
+			 addr = (uint64_t) mi.base_addr + mi.size;
+		 }
+
+		 fprintf(stderr, "found module at 0x%lx\n", addr);
+		 
+		 nso_infos[0] = {addr};
+		 num_nsos = 1;
+	 }
 
 	for(uint32_t i = 0; i < num_nsos; i++) {
 		NsoInfo &info = nso_infos[i];
@@ -299,13 +323,15 @@ void Process::ScanSTables(ipc::client::Object &ldr_dmnt) {
 												sizeof(postfix) - 1, postfix) == 0) {
 					name = name.substr(sizeof(prefix) - 1, name.length() - sizeof(prefix) + 1 - sizeof(postfix) + 1);
 					fprintf(stderr, "  found s_Table: %s\n", name.c_str());
-					s_tables.emplace(name, STable(*this, nso, name, info.addr + sym.st_value));
+					s_tables.emplace(name, STable(*this, name, info.addr + sym.st_value));
 				} else {
 					fprintf(stderr, "  found non-matching s_Table: %s\n", name.c_str());
 				}
 			}
 		}
 	}
+
+   has_scanned = true;
 }
 
 } // namespace ilia

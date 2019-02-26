@@ -1,0 +1,22 @@
+; 6.2.0 Configuration Sample
+;
+; On versions above 4.0.0, you have to specify the offset for each s_Table manually.
+; This takes a bit of IDA work. It's easiet to start with the `swipcgen_server.info`
+; files available here:
+;   https://yls8.mtheall.com/ninupdates/titlelist.php?date=11-19-18_07-05-09&sys=hac&reg=G
+; Check for hash matches for the interfaces you want. If there aren't any, try to pick
+; it out by how mayn commands there are and what they looked like on previous versions.
+; Then, open the sysmodule in IDA, go to the address mentioned for that interface, and
+; find its xref. It should be a function pointer. Take the address of this function pointer,
+; subtract 0x7100000000, and stick it in here.
+
+; You can match processes by title ID like this.
+[title 0100000000000023]
+nn::am::service::ILibraryAppletCreator = 0xe180
+nn::am::service::ILibraryAppletAccessor = 0xc320
+nn::am::service::IStorage = 0x7c00
+nn::am::service::IStorageAccessor = 0x80e0
+
+; You can also match processes by PID (to tap builtins/etc).
+[pid 0x2]
+nn::sm::detail::IUserInterface = 0x2170

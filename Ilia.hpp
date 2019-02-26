@@ -9,6 +9,8 @@
 
 namespace ilia {
 
+class InterfaceSniffer;
+
 class Ilia {
   public:
    Ilia();
@@ -16,6 +18,13 @@ class Ilia {
    bool destroy_flag = false;
    pcapng::Writer pcap_writer;
    trn::Waiter event_waiter;
+
+   trn::service::SM sm;
+   trn::ipc::client::Object ldr_dmnt;
+   trn::ipc::client::Object pm_dmnt;
+
+   std::map<uint64_t, Process> processes;
+   std::vector<std::unique_ptr<InterfaceSniffer>> sniffers;
 };
 
 } // namespace ilia

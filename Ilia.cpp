@@ -12,6 +12,8 @@
 #include<string.h>
 #include<malloc.h>
 
+#include "ini.h"
+
 #include "err.hpp"
 #include "pcapng.hpp"
 #include "util.hpp"
@@ -19,24 +21,97 @@
 #include "Process.hpp"
 #include "InterfaceSniffer.hpp"
 
+static int IniSectionHandler(void *user, const char *section, void **section_context) {
+	ilia::Ilia &ilia = *(ilia::Ilia*) user;
+
+	std::string buf = section;
+	std::string::size_type i = buf.find(' ');
+	if(i == std::string::npos) {
+		fprintf(stderr, "didn't find space\n");
+		return 0;
+	}
+
+	uint64_t pid;
+	if(buf.substr(0, i) == "title") {
+		size_t index;
+		uint64_t tid = std::stoull(buf.substr(i+1), &index, 16);
+		fprintf(stderr, "looking up tid 0x%lx\n", tid);
+		if(index != buf.size() - i - 1) {
+			fprintf(stderr, "didn't consume entire string (%d != %d)\n", index, buf.size());
+			return 0;
+		}
+		if(env_get_kernel_version() >= KERNEL_VERSION_500) {
+			ResultCode::AssertOk(
+				ilia.pm_dmnt.SendSyncRequest<2>(
+					ipc::InRaw<uint64_t>(tid),
+					ipc::OutRaw<uint64_t>(pid)));
+		} else {
+			ResultCode::AssertOk(
+				ilia.pm_dmnt.SendSyncRequest<3>(
+					ipc::InRaw<uint64_t>(tid),
+					ipc::OutRaw<uint64_t>(pid)));
+		}
+	} else if(buf.substr(0, i) == "pid") {
+		size_t index;
+		pid = std::stoull(buf.substr(i+1), &index, 0);
+		if(index != buf.size() - i - 1) {
+			fprintf(stderr, "didn't consume entire string (%d != %d)\n", index, buf.size());
+			return 0;
+		}
+	} else {
+		fprintf(stderr, "unrecognized: '%s'\n",buf.substr(0, i).c_str());
+		return 0;
+	}
+
+	fprintf(stderr, "attaching to process 0x%lx\n", pid);
+   
+	auto p = ilia.processes.find(pid);
+	if(p == ilia.processes.end()) {
+		p = ilia.processes.emplace(
+			std::piecewise_construct,
+			std::make_tuple(pid),
+			std::tuple<ilia::Ilia&, uint64_t>(ilia, pid)).first;
+	}
+
+	*section_context = (void*) &p->second;
+	return 1;
+}
+
+static int IniValueHandler(void *user, void *section_context, const char *name, const char *value) {
+	if(section_context == nullptr) {
+		return 0;
+	}
+	
+	ilia::Ilia &ilia = *(ilia::Ilia*) user;
+	ilia::Process &proc = *(ilia::Process*) section_context;
+
+	if(strcmp(value, "auto") == 0) {
+		ilia.sniffers.emplace_back(std::move(proc.Sniff(name)));
+	} else {
+		size_t offset = std::stoull(value);
+		fprintf(stderr, "attaching to manual '%s' = 0x%lx\n", name, offset);
+		ilia.sniffers.emplace_back(std::move(proc.Sniff(name, offset)));
+	}
+	
+	return 1;
+}
+
 int main(int argc, char *argv[]) {
 	try {
 		ilia::Ilia ilia;
 
-		trn::service::SM sm = trn::ResultCode::AssertOk(trn::service::SM::Initialize());
-		trn::ipc::client::Object ldr_dmnt = trn::ResultCode::AssertOk(
-			sm.GetService("ldr:dmnt"));
-      
-		ilia::Process ns(ilia, 0x5b);
-		ns.ScanSTables(ldr_dmnt);
-		auto a = ns.Sniff("nn::ovln::IReceiverService");
-		auto b = ns.Sniff("nn::ovln::IReceiver");
-		auto c = ns.Sniff("nn::ovln::ISender");
+		FILE *f = fopen("/sd/ilia.ini", "r");
+		if(!f) {
+			fprintf(stderr, "could not open configuration\n");
+			return 1;
+		}
 
-		ilia::Process bus(ilia, 0x52);
-		bus.ScanSTables(ldr_dmnt);
-		auto d = bus.Sniff("nn::i2c::ISession");
-
+		int error = ini_parse_file(f, &IniValueHandler, &IniSectionHandler, &ilia);
+		if(error != 0) {
+			fprintf(stderr, "ini error on line %d\n", error);
+			return 1;
+		}
+		
 		while(!ilia.destroy_flag) {
 			trn::ResultCode::AssertOk(ilia.event_waiter.Wait(3000000000));
 		}
@@ -53,7 +128,10 @@ namespace ilia {
 
 Ilia::Ilia() :
 	pcap_writer(),
-	event_waiter() {
+	event_waiter(),
+	sm(trn::ResultCode::AssertOk(trn::service::SM::Initialize())),
+	ldr_dmnt(trn::ResultCode::AssertOk(sm.GetService("ldr:dmnt"))),
+	pm_dmnt(trn::ResultCode::AssertOk(sm.GetService("pm:dmnt"))) {
 	static const char shb_hardware[] = "Nintendo Switch";
 	static const char shb_os[] = "Horizon";
 	static const char shb_userappl[] = "ilia";

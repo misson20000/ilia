@@ -51,9 +51,8 @@ class Process {
 
 	class STable {
 	 public:
-		STable(Process &process, NSO &nso, std::string interface_name, uint64_t addr);
+		STable(Process &process, std::string interface_name, uint64_t addr);
 		Process &process;
-		NSO &nso;
 		const std::string interface_name;
 		const uint64_t addr;
 	};
@@ -82,8 +81,9 @@ class Process {
 	bool has_scanned = false;
 	bool pending_begin = false;
 
-	void ScanSTables(trn::ipc::client::Object &ldr_dmnt);
+	void ScanSTables();
 	std::unique_ptr<InterfaceSniffer> Sniff(const char *name);
+   std::unique_ptr<InterfaceSniffer> Sniff(std::string name, uint64_t addr);
 	void Begin();
 
 	template<typename T>

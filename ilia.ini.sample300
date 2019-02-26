@@ -1,0 +1,17 @@
+; 3.0.0 Configuration Sample
+
+; On versions below 4.0.0, you can use `auto` to scan symbols for s_Tables.
+; If you like, you could also specify them manually. See ilia.ini.sample620.
+
+; You can match processes by title ID like this.
+; (note: no 0x prefix)
+[title 0100000000000023]
+nn::am::service::ILibraryAppletCreator = auto
+nn::am::service::ILibraryAppletAccessor = auto
+nn::am::service::IStorage = auto
+nn::am::service::IStorageAccessor = auto
+
+; You can also match processes by PID (to tap builtins/etc).
+; (note: 0x prefix)
+[pid 0x5]
+nn::lr::ILocationResolver = auto

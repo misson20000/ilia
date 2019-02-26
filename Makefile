@@ -4,7 +4,7 @@ ifndef LIBTRANSISTOR_HOME
 endif
 include $(LIBTRANSISTOR_HOME)/libtransistor.mk
 
-ILIA_OBJECTS := Ilia.o Process.o InterfaceSniffer.o Buffer.o pcapng.o util.o
+ILIA_OBJECTS := Ilia.o Process.o InterfaceSniffer.o Buffer.o pcapng.o util.o ini.o
 LIBIBERTY_OBJECTS := cp-demangle.o
 
 ILIA_CXX_FLAGS := -g -Og -I vendor
