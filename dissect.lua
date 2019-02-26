@@ -9,7 +9,7 @@ local pf_rq_raw_params = ProtoField.bytes("ilia-cmif.rq.raw_params", "Raw Data")
 local pf_result = ProtoField.uint32("ilia-cmif.result", "Result Code", base.HEX)
 local pf_meta = ProtoField.bytes("ilia-cmif.meta_info", "Message Meta Info")
 local pf_buffer = ProtoField.bytes("ilia-cmif.buffer", "Buffer")
-local pf_buffer_type = ProtoField.uint32("ilia-cmif.buffer_type", "Buffer Type")
+local pf_buffer_type = ProtoField.uint32("ilia-cmif.buffer_type", "Buffer Type", base.HEX)
 
 local pf_rs_magic = ProtoField.string("ilia-cmif.rs.magic", "Response Magic")
 local pf_rs_code = ProtoField.uint32("ilia-cmif.rs.id", "Response Code", base.HEX)
