@@ -49,7 +49,7 @@ InterfaceSniffer::MessageContext::MessageContext(
 	rq_data(rq_pas.size),
 	vtable(*this, thread.process, (*message).vtable),
 	holder(thread, vtable.trap_vtable) {
-	fprintf(stderr, "entering message handling context for thread 0x%lx\n", thread.thread_id);
+	//fprintf(stderr, "entering message handling context for thread 0x%lx\n", thread.thread_id);
 	process.ReadBytes(rq_data, rq_pas.pointer);
 	message = {holder.addr}; // poison vtable
 }
@@ -78,7 +78,7 @@ static void MakeChunk(util::Buffer &message, ChunkType type, T &t) {
 }
 
 InterfaceSniffer::MessageContext::~MessageContext() {
-	fprintf(stderr, "leaving message handling context for thread 0x%lx\n", thread.thread_id);
+	//fprintf(stderr, "leaving message handling context for thread 0x%lx\n", thread.thread_id);
 	message = {vtable.real_vtable_addr}; // restore vtable
 
 	uint32_t result = (uint32_t) thread.GetContext().x[0];

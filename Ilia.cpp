@@ -37,7 +37,6 @@ static int IniSectionHandler(void *user, const char *section, void **section_con
 		uint64_t tid = std::stoull(buf.substr(i+1), &index, 16);
 		fprintf(stderr, "looking up tid 0x%lx\n", tid);
 		if(index != buf.size() - i - 1) {
-			fprintf(stderr, "didn't consume entire string (%d != %d)\n", index, buf.size());
 			return 0;
 		}
 		if(env_get_kernel_version() >= KERNEL_VERSION_500) {
@@ -55,7 +54,6 @@ static int IniSectionHandler(void *user, const char *section, void **section_con
 		size_t index;
 		pid = std::stoull(buf.substr(i+1), &index, 0);
 		if(index != buf.size() - i - 1) {
-			fprintf(stderr, "didn't consume entire string (%d != %d)\n", index, buf.size());
 			return 0;
 		}
 	} else {
