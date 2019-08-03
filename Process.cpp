@@ -105,8 +105,11 @@ std::unique_ptr<InterfaceSniffer> Process::Sniff(const char *name) {
 	return std::make_unique<InterfaceSniffer>(ilia, i->second);
 }
 
-std::unique_ptr<InterfaceSniffer> Process::Sniff(std::string name, uint64_t addr) {
-   auto i = s_tables.emplace(name, STable(*this, name, addr)).first;
+std::unique_ptr<InterfaceSniffer> Process::Sniff(std::string name, uint64_t offset) {
+   if(!has_scanned) {
+      ScanSTables();
+   }
+   auto i = s_tables.emplace(name, STable(*this, name, likely_aslr_base + offset)).first;
    return std::make_unique<InterfaceSniffer>(ilia, i->second);
 }
 
@@ -229,12 +232,12 @@ uint64_t Process::TrapAddress(size_t index) {
 
 void Process::ScanSTables() {
 	struct NsoInfo {
-		uint64_t addr;
-		size_t size;
 		union {
 			uint8_t build_id[0x20];
 			uint64_t build_id_64[4];
 		};
+		uint64_t addr;
+		size_t size;
 	};
 	std::vector<NsoInfo> nso_infos(16, {0, 0, 0});
 	uint32_t num_nsos;
@@ -258,9 +261,11 @@ void Process::ScanSTables() {
 
 		 fprintf(stderr, "found module at 0x%lx\n", addr);
 		 
-		 nso_infos[0] = {addr};
+		 nso_infos[0] = {.addr = addr};
 		 num_nsos = 1;
 	 }
+
+	 likely_aslr_base = nso_infos[0].addr;
 
 	for(uint32_t i = 0; i < num_nsos; i++) {
 		NsoInfo &info = nso_infos[i];

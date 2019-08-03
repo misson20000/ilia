@@ -183,6 +183,7 @@ class Process {
  private:
 	std::vector<NSO> nsos;
 	std::map<std::string, STable> s_tables;
+	uint64_t likely_aslr_base;
 	
 	std::map<uint64_t, Thread> threads;
 	std::vector<Trap*> traps;

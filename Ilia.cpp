@@ -88,8 +88,8 @@ static int IniValueHandler(void *user, void *section_context, const char *name, 
 	if(strcmp(value, "auto") == 0) {
 		ilia.sniffers.emplace_back(std::move(proc.Sniff(name)));
 	} else {
-		size_t offset = std::stoull(value);
-		fprintf(stderr, "attaching to manual '%s' = 0x%lx\n", name, offset);
+		size_t offset = std::stoull(value, nullptr, 0);
+		fprintf(stderr, "attaching to manual '%s' = 0x%lx (\"%s\")\n", name, offset, value);
 		ilia.sniffers.emplace_back(std::move(proc.Sniff(name, offset)));
 	}
 	
